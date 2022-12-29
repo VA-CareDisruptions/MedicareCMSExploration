@@ -1,0 +1,137 @@
+---
+title: "index"
+author: "Dan Weinberger"
+date: '2022-12-28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(arrow)
+library(dplyr)
+library(ggplot2)
+ 
+```
+
+```{r}
+csv_file <- "T:/denom/den_saf_lds_100_201.csv"
+
+dest <- "T:/parquet/denom/" 
+
+#double()
+#string()
+#float()
+#int32()
+#https://www.cms.gov/Research-Statistics-Data-and-Systems/Files-for-Order/LimitedDataSets/Downloads/SAFldsDenomNov2009.pdf
+
+sch = arrow::schema(DSYSRTKY = string(),
+                    STATE_CD = string(),
+                    CNTY_CD = double(),
+                    SEX = int32(),
+                    RACE = int32(),
+                    AGE =int32(),
+                    OREC = int32(),
+                    CREC =int32(),
+                    ESRD_IND= string(),
+                    MS_CD= int32(),
+                    A_TRM_CD=int32(),
+                    B_TRM_CD= int32(),
+                    BUYIN1 = string(),
+                    BUYIN2 = string(),
+                    BUYIN3 = string(),
+                    BUYIN4 = string(),
+                    BUYIN5 = string(),
+                    BUYIN6 = string(),
+                    BUYIN7 = string(),
+                    BUYIN8 = string(),
+                    BUYIN9 = string(),
+                    BUYIN10 = string(),
+                    BUYIN11 = string(),
+                    BUYIN12 = string(),
+                    HMOIND1 = string(),
+                    HMOIND2 = string(),
+                    HMOIND3 = string(),
+                    HMOIND4 = string(),
+                    HMOIND5 = string(),
+                    HMOIND6 = string(),
+                    HMOIND7 = string(),
+                    HMOIND8 = string(),
+                    HMOIND9 = string(),
+                    HMOIND10 = string(),
+                    HMOIND11 = string(),
+                    HMOIND12 = string(),
+                    A_MO_CNT = int32(),
+                    B_MO_CNT = int32(),
+                    HMO_MO = int32(),
+                    BUYIN_MO = string(),
+                    V_DOD_SW =string(),
+                    DEATH_DT = string(),
+                    RFRNC_YR=int32()
+                    )
+
+csv_stream <- open_dataset("T:/denom/", format = "csv", schema = sch)
+
+```
+
+Write the data to a parquet dataset
+```{r}
+write_dataset(csv_stream, dest, format = "parquet", 
+              max_rows_per_file=1000000L,
+              hive_style = TRUE,
+              existing_data_behavior = "overwrite")
+```
+
+
+Read in the parquet database
+```{r}
+pq_stream <- open_dataset("T:/parquet/denom/", format = "parquet", schema = sch)
+
+```
+
+Take a test pull from the dataset
+```{r}
+test1 <- csv_stream %>% 
+  slice_head( n = 5) %>%
+  collect() #use collect() to take parquet to dataframe
+```
+
+Look at age distribution of all enrollees in 2015
+should be ~54 million enrollees in 2015 (58.6 million in 2021)..
+to run on the csv_stream takes 151 seconds
+```{r}
+ptm <- proc.time()
+N_age <- csv_stream %>% 
+  select(AGE,RFRNC_YR) %>%
+  filter(RFRNC_YR==15) %>%
+group_by(AGE) %>%
+  summarize(N_obs = n()) %>% #use collect() to take parquet to dataframe
+    collect()
+
+proc.time() - ptm
+
+
+ggplot(N_age, aes(x=AGE, y=N_obs)) +
+  geom_line()
+```
+
+to run on the parquet data takes 22 seconds
+```{r}
+ptm <- proc.time()
+N_age2 <- pq_stream %>% 
+  select(AGE,RFRNC_YR) %>%
+  filter(RFRNC_YR==15) %>%
+group_by(AGE) %>%
+  summarize(N_obs = n()) %>% #use collect() to take parquet to dataframe
+    collect()
+
+proc.time() - ptm
+
+ggplot(N_age2, aes(x=AGE, y=N_obs)) +
+  geom_line()
+```
+
+
+
+
+ 
+
