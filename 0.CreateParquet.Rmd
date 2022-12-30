@@ -66,8 +66,8 @@ Inpatient base files
 ```{r}
 dest_inp <- "T:/parquet/inp/" 
 
-csv_stream_inp <- open_dataset("T:/inp/inp1/basek2016_2021", format = "csv", schema = sch_inp_basek) %>%
-  group_by(ADMSN_DT) #ensure chunks are not too large for memory
+csv_stream_inp <- open_dataset("T:/inp/inp1/basek2016_2021", format = "csv", schema = sch_inp_basek) # %>%
+ # group_by(ADMSN_DT) #ensure chunks are not too large for memory
 
 write_dataset(csv_stream_inp, dest_inp, format = "parquet", 
                max_rows_per_file = 1e5,
