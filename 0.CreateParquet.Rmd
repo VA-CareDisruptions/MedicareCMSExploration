@@ -15,7 +15,9 @@ source('./R/schema.R')
  
 ```
 
-First, denom files for 2014-2016; after 2016, shifts to MBSF files
+This Rmd file converts CSV files to parquet databases using the arrow package. 
+
+denom files for 2014-2016; after 2016, shifts to MBSF files
 
 ```{r}
 csv_file_denom <- "T:/denom/den_saf_lds_100_201.csv"
