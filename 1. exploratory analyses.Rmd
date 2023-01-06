@@ -1,0 +1,224 @@
+---
+title: "1. exploratory analyses"
+author: "Dan Weinberger"
+date: '2023-01-05'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(arrow)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+source('./R/schema.R')
+
+```
+
+## Read in the parquet database
+
+```{r} 
+pq_stream_denom <- open_dataset("T:/parquet/denom/", format = "parquet", schema = sch_denom)
+```
+
+```{r} 
+pq_stream_inp <- open_dataset("T:/parquet/inp/", format = "parquet", schema = sch_inp_basek)
+```
+
+## Test databases 
+
+Take a test pull from the dataset
+```{r}
+test1 <- pq_stream_denom %>% 
+  slice_head( n = 10000) %>%
+  collect() #use collect() to take parquet to dataframe
+```
+
+Look at age distribution of all enrollees in 2015
+should be ~54 million enrollees in 2015 (58.6 million in 2021)..
+
+to run on the csv_stream takes 151 seconds
+to run on the parquet data stream takes 22 seconds
+```{r}
+ptm <- proc.time()
+N_age2 <- pq_stream_denom %>% 
+  filter(AGE>=65 & RFRNC_YR==15) %>%
+  select(AGE,RFRNC_YR) %>%
+group_by(AGE) %>%
+  summarize(N_obs = n()) %>% #use collect() to take parquet to dataframe
+    collect()
+
+proc.time() - ptm
+
+ggplot(N_age2, aes(x=AGE, y=N_obs)) +
+  geom_line()+
+  theme_classic()
+```
+
+
+```{r}
+test <-pq_stream_inp %>%
+slice_head( n = 50) %>%
+  collect() 
+```
+
+Number of admissions by week, nationally
+
+Break out by week and ICD chapter AND region
+```{r,eval=F}
+#runs in 2.5 min
+ptm <- proc.time()
+N_chapter_date_state <- pq_stream_inp %>%
+  mutate(princ_icd_chapt =substr(PRNCPAL_DGNS_CD,1,1)) %>%
+  group_by(princ_icd_chapt,ADMSN_DT,STATE_CD) %>%
+  summarize(N_cases = n()) %>%
+  collect() %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d')) 
+saveRDS(N_chapter_date_state,"T:/results/inp/N_chapter_date_state.rds")
+proc.time() - ptm
+```
+
+
+```{r}
+state_cw <- read.csv('./Data/SSA_state_crosswalk.csv')
+
+readRDS("T:/results/inp/N_chapter_date_state.rds")
+
+state.info <- cbind.data.frame(state.name, state.abb, state.region)
+
+statedate <- N_chapter_date_state %>%
+  filter(date>='2017-01-01' &date<='2021-11-20' )%>%
+  mutate(STATE_CD=as.numeric(STATE_CD)) %>%
+  left_join(state_cw, by=c('STATE_CD'='STATE_SSA')) %>%
+left_join(state.info,by=c('STATENAME'='state.name')) %>%
+  mutate(weekdate=lubridate::floor_date(date, 'week')) %>%
+  group_by(princ_icd_chapt,state.region,weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+  ungroup()
+```
+
+National, all causes
+```{r}
+statedate%>%
+   group_by(weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+    ggplot(aes(x=weekdate, y=N_cases))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+National, by chapter
+```{r, fig.width=10, fig.height=9}
+statedate%>%
+   group_by(princ_icd_chapt,weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+    ggplot(aes(x=weekdate, y=N_cases))+
+  facet_wrap(~princ_icd_chapt, scales='free_y') +
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+
+Sam but filter by region (Northeast, North Central, South, West
+)
+```{r}
+statedate%>%
+  filter(state.region=='West') %>%
+  ggplot(aes(x=weekdate, y=N_cases))+
+  geom_line()+
+  facet_wrap(~princ_icd_chapt, scales='free_y') +
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+
+```
+
+
+
+```{r}
+
+ptm <- proc.time()
+inp1 <- pq_stream_inp %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'),     
+             all_dx = paste0(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J127',all_dx)|grepl('J18',all_dx)) %>%
+  group_by(date) %>%
+  summarize(J12_18=n()) %>%
+  collect()
+proc.time() - ptm
+
+inp1 %>%
+  arrange(date) %>%
+  filter(date>='2017-01-01') %>%
+  ggplot(aes( x=date, y=J12_18) )+
+  geom_line()+
+  theme_classic()
+  
+```
+
+
+```{r}
+ptm <- proc.time()
+N_age_die <- pq_stream_denom %>%
+  filter(DEATH_DT != '') %>%
+  select(AGE,RFRNC_YR) %>%
+  filter(RFRNC_YR==15) %>%
+group_by(AGE) %>%
+  summarize(N_deaths = n()) %>% #use collect() to take parquet to dataframe
+    collect()
+
+proc.time() - ptm
+
+ggplot(N_age_die, aes(x=AGE, y=N_deaths)) +
+  geom_line()
+```
+
+probability of death per year
+```{r}
+death_rate <- N_age2 %>%
+  filter(AGE>=65) %>%
+  left_join(N_age_die, by='AGE') %>%
+  mutate( N_deaths = ifelse(is.na(N_deaths),0,N_deaths),
+    death_rate= N_deaths/N_obs 
+    ) 
+
+  ggplot( death_rate, aes(x=AGE, y=death_rate)) +
+  geom_line() +
+    theme_classic()
+
+```
+
+
+
+
+
+ 
+
