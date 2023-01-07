@@ -11,7 +11,10 @@ library(arrow)
 library(tidyr)
 library(dplyr)
 library(ggplot2)
+library(duckdb)
 source('./R/schema.R')
+state_cw <- read.csv('./Data/SSA_state_crosswalk.csv')
+state.info <- cbind.data.frame(state.name, state.abb, state.region)
 
 ```
 
@@ -23,6 +26,10 @@ pq_stream_denom <- open_dataset("T:/parquet/denom/", format = "parquet", schema 
 
 ```{r} 
 pq_stream_inp <- open_dataset("T:/parquet/inp/", format = "parquet", schema = sch_inp_basek)
+```
+
+```{r} 
+pq_stream_snf <- open_dataset("T:/parquet/snf/", format = "parquet", schema = sch_inp_basek)
 ```
 
 ## Test databases 
@@ -62,7 +69,7 @@ slice_head( n = 50) %>%
   collect() 
 ```
 
-Number of admissions by week, nationally
+## Number of inpatient admissions by week, nationally
 
 Break out by week and ICD chapter AND region
 ```{r,eval=F}
@@ -80,11 +87,9 @@ proc.time() - ptm
 
 
 ```{r}
-state_cw <- read.csv('./Data/SSA_state_crosswalk.csv')
 
-readRDS("T:/results/inp/N_chapter_date_state.rds")
+N_chapter_date_state <- readRDS("T:/results/inp/N_chapter_date_state.rds")
 
-state.info <- cbind.data.frame(state.name, state.abb, state.region)
 
 statedate <- N_chapter_date_state %>%
   filter(date>='2017-01-01' &date<='2021-11-20' )%>%
@@ -108,6 +113,32 @@ statedate%>%
   ylim(0,NA) +
   geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
 ```
+mean Length of stay (LOS)
+```{r}
+ptm <- proc.time()
+LOS_trends <- pq_stream_inp %>%
+  mutate(LOS = UTIL_DAY + COIN_DAY) %>%
+  group_by(ADMSN_DT) %>%
+  summarize(LOS = mean(LOS)) %>%
+  collect() %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'), weekdate=lubridate::floor_date(date, 'week')) %>%  
+  ungroup() %>%
+  group_by(weekdate) %>%
+  summarize(LOS = mean(LOS)) 
+saveRDS(LOS_trends,"T:/results/inp/LOS_date.rds")
+
+proc.time() - ptm
+
+
+LOS_trends %>%
+  filter(weekdate>='2017-01-01' &weekdate<='2021-11-20' )%>%
+ ggplot(aes(x=weekdate, y=LOS))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+
 National, by chapter
 ```{r, fig.width=10, fig.height=9}
 statedate%>%
@@ -121,7 +152,7 @@ statedate%>%
   geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
 ```
 
-Sam but filter by region (Northeast, North Central, South, West
+Same but filter by region (Northeast, North Central, South, West
 )
 ```{r}
 statedate%>%
@@ -217,8 +248,104 @@ death_rate <- N_age2 %>%
 ```
 
 
+## skilled nursing trend
+
+test pull
+```{r}
+test2 <- pq_stream_snf %>% 
+  slice_head( n = 100) %>%
+  collect() #use collect() to take parquet to dataframe
+```
+
+```{r,eval=F}
+#20151210 ADMSN_DT  WATCH OUT FOR DUPLICATES  ADMSN_DT DSCHRGDT
+#runs ~5 min
+ptm <- proc.time()
+N_snf_date_state <- pq_stream_snf |> 
+    to_duckdb() |> #convert to duckdb database to allow for row_number
+  select(DSYSRTKY,ADMSN_DT,ADMSN_DT,STATE_CD,DSCHRGDT) %>%
+  group_by(DSYSRTKY,ADMSN_DT) %>%
+  collect() %>%
+  mutate(record_N=row_number()) %>% #removes duplicates
+  ungroup() %>%
+  filter(record_N==1) %>%
+  group_by(ADMSN_DT,STATE_CD) %>%
+  summarize(N_cases = n()) %>%
+  #collect() %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d')) 
+
+saveRDS(N_snf_date_state,"T:/results/snf/N_date_state_snf.rds")
+proc.time() - ptm
+```
+
+```{r}
+statedate_snf <- N_snf_date_state %>%
+  filter(date>='2017-01-01' &date<='2021-11-20' )%>%
+  mutate(STATE_CD=as.numeric(STATE_CD)) %>%
+  left_join(state_cw, by=c('STATE_CD'='STATE_SSA')) %>%
+left_join(state.info,by=c('STATENAME'='state.name')) %>%
+  mutate(weekdate=lubridate::floor_date(date, 'week')) %>%
+  group_by(state.region,weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+  ungroup()
+
+```
 
 
+```{r}
+statedate_snf%>%
+   group_by(weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+    ggplot(aes(x=weekdate, y=N_cases))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+
+LOS in snf
+
+```{r}
+ptm <- proc.time() 
+LOS_date_admit <- pq_stream_snf %>% 
+  filter(DSCHRGDT !='') %>%
+   mutate(
+         dateADMT=as.Date(ADMSN_DT,'%Y%m%d'),
+         dateDIS=as.Date(DSCHRGDT,'%Y%m%d'),
+         LOS2 = dateDIS - dateADMT
+         ) %>%
+  group_by(dateADMT) %>%
+  select(dateADMT, LOS2) %>%
+  collect() %>%
+  summarize(LOS2=mean(LOS2)) 
+proc.time() - ptm
+
+
+```
+
+```{r}
+#60sec, 60min, 24
+LOS_date_admit <- LOS_date_admit %>%
+  mutate(LOS2_days=as.numeric(LOS2)/60/60/24) %>%
+  filter(dateADMT>='2016-01-01' & dateADMT<'2021-11-01')
+```
+
+```{r}
+LOS_date_admit %>%
+  ggplot(aes(x=dateADMT, y=LOS2_days))+
+  geom_line()+
+  theme_classic()
+```
+
+```{r}
+LOS_date_admit %>%
+  mutate(admt_mont=lubridate::floor_date(dateADMT, 'month')) %>%
+  group_by(admt_mont) %>%
+  summarize(LOS2_days=mean(LOS2_days)) %>%
+  ggplot(aes(x=admt_mont, y=LOS2_days))+
+  geom_line()+
+  theme_classic()
+```
 
  
 

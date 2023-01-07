@@ -75,3 +75,17 @@ write_dataset(csv_stream_inp, dest_inp, format = "parquet",
               hive_style = TRUE,
               existing_data_behavior = "overwrite")
 ```
+
+Skilled nursing
+
+```{r}
+dest_snf <- "T:/parquet/snf/" 
+
+csv_stream_snf <- open_dataset("T:/snf/claimsk2016_2021/", format = "csv", schema = sch_snf_basek) 
+
+write_dataset(csv_stream_snf, dest_snf, format = "parquet", 
+               max_rows_per_file = 3e5,
+              #max_open_files=20, #default is 900L
+              hive_style = TRUE,
+              existing_data_behavior = "overwrite")
+```
