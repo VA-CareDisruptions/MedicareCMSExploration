@@ -215,6 +215,7 @@ inp1 %>%
   
 ptm <- proc.time()
 
+#takes about 10 min to run
 j12_18_line <- pq_stream_inp %>%
   mutate(date=as.Date(ADMSN_DT,'%Y%m%d'),     
              all_dx = paste(ICD_DGNS_CD1,
@@ -245,7 +246,7 @@ j12_18_line <- pq_stream_inp %>%
                     ICD_DGNS_CD24)
                   )%>%
   filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)) %>%
-  select(DSYSRTKY, all_dx,date,GNDR_CD,RACE_CD, CNTY_CD, STATE_CD , ICD_DGNS, ) %>%
+  select(DSYSRTKY, all_dx,date,GNDR_CD,RACE_CD, CNTY_CD, STATE_CD , starts_with('ICD_DGNS'),starts_with('CLM_POA_IND'),PTNTSTUS ) %>%
   collect()
 proc.time() - ptm
 
@@ -254,11 +255,24 @@ j13_line <- j12_18_line %>%
   mutate(weekdate=lubridate::floor_date(date, 'week')) 
 
 j13_line%>%
-  group_by(weekdate) %>%
+  group_by(PTNTSTUS,weekdate) %>%
   summarize(N_cases=n()) %>%
+  filter(PTNTSTUS %in% c('A','B')) %>%
   ggplot(aes(x=weekdate, y=N_cases))+
   geom_line() +
-  theme_classic()
+  theme_classic()+
+  facet_wrap(~PTNTSTUS, scales='free_y' )
+
+j13_line%>%
+  filter(PTNTSTUS %in% c('A','B') &
+           !grepl('A40',all_dx) & !grepl('A41',all_dx)) %>%
+  group_by(PTNTSTUS,weekdate) %>%
+  summarize(N_cases=n()) %>%
+  
+  ggplot(aes(x=weekdate, y=N_cases))+
+  geom_line() +
+  theme_classic()+
+  facet_wrap(~PTNTSTUS, scales='free_y' )
 
 ```
 
