@@ -167,7 +167,7 @@ statedate%>%
 ```
 
 
-
+NOTE This is currently ALL pneumonia; not just community-acquired (present on admission)
 ```{r}
 
 ptm <- proc.time()
@@ -200,7 +200,7 @@ inp1 <- pq_stream_inp %>%
                     ICD_DGNS_CD24,
                     ICD_DGNS_CD24)
                   )%>%
-  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J127',all_dx)|grepl('J18',all_dx)) %>%
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)) %>%
   group_by(date) %>%
   summarize(J12_18=n()) %>%
   collect()
@@ -213,6 +213,53 @@ inp1 %>%
   geom_line()+
   theme_classic()
   
+ptm <- proc.time()
+
+j12_18_line <- pq_stream_inp %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'),     
+             all_dx = paste(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)) %>%
+  select(DSYSRTKY, all_dx,date,GNDR_CD,RACE_CD, CNTY_CD, STATE_CD , ICD_DGNS, ) %>%
+  collect()
+proc.time() - ptm
+
+j13_line <- j12_18_line %>%
+  filter( grepl('J13',all_dx)) %>%
+  mutate(weekdate=lubridate::floor_date(date, 'week')) 
+
+j13_line%>%
+  group_by(weekdate) %>%
+  summarize(N_cases=n()) %>%
+  ggplot(aes(x=weekdate, y=N_cases))+
+  geom_line() +
+  theme_classic()
+
 ```
 
 
