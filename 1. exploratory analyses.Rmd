@@ -12,6 +12,8 @@ library(tidyr)
 library(dplyr)
 library(ggplot2)
 library(duckdb)
+library(plotly)
+library(lubridate)
 source('./R/schema.R')
 state_cw <- read.csv('./Data/SSA_state_crosswalk.csv')
 state.info <- cbind.data.frame(state.name, state.abb, state.region)
@@ -214,10 +216,11 @@ inp1 %>%
   theme_classic()
   
 ptm <- proc.time()
-
 #takes about 10 min to run
 j12_18_line <- pq_stream_inp %>%
-  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'),     
+  #slice_head( n = 50) %>%
+  mutate(#adate=as.Date(ADMSN_DT,'%Y%m%d'),
+        # ddate = as.Date(DSCHRGDT,'%Y%m%d'),
              all_dx = paste(ICD_DGNS_CD1,
                          ICD_DGNS_CD1,
                          ICD_DGNS_CD2,
@@ -246,30 +249,58 @@ j12_18_line <- pq_stream_inp %>%
                     ICD_DGNS_CD24)
                   )%>%
   filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)) %>%
-  select(DSYSRTKY, all_dx,date,GNDR_CD,RACE_CD, CNTY_CD, STATE_CD , starts_with('ICD_DGNS'),starts_with('CLM_POA_IND'),PTNTSTUS ) %>%
+  select(DSYSRTKY, all_dx,ADMSN_DT,DSCHRGDT,GNDR_CD,RACE_CD, CNTY_CD, STATE_CD ,starts_with('CLM_POA_IND'),PTNTSTUS ) %>%
   collect()
 proc.time() - ptm
 
 j13_line <- j12_18_line %>%
   filter( grepl('J13',all_dx)) %>%
-  mutate(weekdate=lubridate::floor_date(date, 'week')) 
+  mutate(adate=as.Date(ADMSN_DT,'%Y%m%d'),
+         ddate=as.Date(DSCHRGDT,'%Y%m%d'),
+         aweekdate=lubridate::floor_date(adate, 'week'),
+         dweekdate=lubridate::floor_date(ddate, 'week'),
+         LOS= as.numeric(difftime(ddate, adate, units='days' )),
+         LOS=as.numeric(LOS),
+         LOS_grp = if_else(LOS %in% c(0,1),1,
+                        if_else(LOS>=2 & LOS<=6,2,
+                        if_else(LOS>=7 & LOS<=13,3,
+                        if_else(LOS>=14 ,4,999))))
+  )
 
+hist(j13_line$LOS)
+
+#Group by alive/dead
 j13_line%>%
-  group_by(PTNTSTUS,weekdate) %>%
+  group_by(PTNTSTUS,aweekdate) %>%
   summarize(N_cases=n()) %>%
   filter(PTNTSTUS %in% c('A','B')) %>%
-  ggplot(aes(x=weekdate, y=N_cases))+
+  ggplot(aes(x=aweekdate, y=N_cases))+
   geom_line() +
   theme_classic()+
-  facet_wrap(~PTNTSTUS, scales='free_y' )
+  facet_wrap(~PTNTSTUS, scales='free_y' )+
+  ggtitle('Trend in those that die vs survive J13')
+
+#Group by LOS
+
+j13_line%>%
+  group_by(LOS_grp,aweekdate) %>%
+  summarize(N_cases=n()) %>%
+  filter(LOS_grp %in% c(1,2,3,4)) %>%
+  mutate(LOS_grp=as.factor(LOS_grp)) %>%
+  ggplot(aes(x=aweekdate, y=N_cases))+
+  geom_line() +
+  theme_classic()+
+  facet_wrap(~LOS_grp, scales='free_y' )+
+  ylim(0,NA) +
+  ggtitle('Trend in long vs short duration stay, J13')
 
 j13_line%>%
   filter(PTNTSTUS %in% c('A','B') &
            !grepl('A40',all_dx) & !grepl('A41',all_dx)) %>%
-  group_by(PTNTSTUS,weekdate) %>%
+  group_by(PTNTSTUS,aweekdate) %>%
   summarize(N_cases=n()) %>%
   
-  ggplot(aes(x=weekdate, y=N_cases))+
+  ggplot(aes(x=aweekdate, y=N_cases))+
   geom_line() +
   theme_classic()+
   facet_wrap(~PTNTSTUS, scales='free_y' )
@@ -366,47 +397,160 @@ statedate_snf%>%
 
 LOS in snf
 
+45 sec!
 ```{r}
 ptm <- proc.time() 
 LOS_date_admit <- pq_stream_snf %>% 
+  to_duckdb() %>%
   filter(DSCHRGDT !='') %>%
    mutate(
-         dateADMT=as.Date(ADMSN_DT,'%Y%m%d'),
-         dateDIS=as.Date(DSCHRGDT,'%Y%m%d'),
-         LOS2 = dateDIS - dateADMT
+         dateADMT=strptime(ADMSN_DT,'%Y%m%d'),
+         dateDIS=strptime(DSCHRGDT,'%Y%m%d'),
+         LOS2 = datediff('day',dateADMT,dateDIS)
          ) %>%
   group_by(dateADMT) %>%
+  filter(dateADMT>='2016-01-01' & dateADMT<='2021-11-20' ) %>%
   select(dateADMT, LOS2) %>%
-  collect() %>%
-  summarize(LOS2=mean(LOS2)) 
+  collect() 
+
 proc.time() - ptm
 
 
 ```
 
 ```{r}
-#60sec, 60min, 24
-LOS_date_admit <- LOS_date_admit %>%
-  mutate(LOS2_days=as.numeric(LOS2)/60/60/24) %>%
-  filter(dateADMT>='2016-01-01' & dateADMT<'2021-11-01')
-```
-
-```{r}
-LOS_date_admit %>%
-  ggplot(aes(x=dateADMT, y=LOS2_days))+
+LOS_date_admit%>%
+   mutate(aweekdate= lubridate::floor_date(dateADMT,'week')) %>%
+  ungroup() %>%
+      group_by(aweekdate) %>% 
+    summarize(LOS2=mean(LOS2)) %>%
+  ggplot(aes(x=aweekdate, y=LOS2))+
   geom_line()+
   theme_classic()
 ```
+### Occupancy
+SNF
+```{r}
+los_date_admit_summary <- LOS_date_admit%>%
+    group_by(dateADMT, LOS2) %>%
+   summarize(N=n()) %>%
+  mutate(dateADMT=as.Date(dateADMT),
+         dateDIS= dateADMT + LOS2)
+
+all.date <- seq.Date(from=min(los_date_admit_summary$dateADMT), to=max(los_date_admit_summary$dateADMT), by='week')
+
+
+occupancy <- pbapply::pblapply(all.date, function(x){
+  occ <-   los_date_admit_summary %>%
+    ungroup() %>%
+    filter(dateADMT<=x & dateDIS>=x) %>%
+    summarize(occupancy=sum(N))  
+  return(occ)
+}) %>% 
+  bind_rows() 
+
+cbind.data.frame(all.date,occupancy) %>%
+  filter(all.date>='2016-03-01') %>%
+ggplot( aes(x=all.date , y=occupancy)) +
+  geom_line() +
+  ylim(0, NA) +
+  theme_classic()
+
+```
+Inpatients
+```{r}
+ptm <- proc.time() 
+LOS_date_admit_inp <- pq_stream_inp %>% 
+  to_duckdb() %>%
+  filter(DSCHRGDT !='') %>%
+   mutate(
+         dateADMT=strptime(ADMSN_DT,'%Y%m%d'),
+         dateDIS=strptime(DSCHRGDT,'%Y%m%d'),
+         LOS2 = datediff('day',dateADMT,dateDIS)
+         ) %>%
+  group_by(dateADMT) %>%
+  filter(dateADMT>='2016-01-01' & dateADMT<='2021-11-20' ) %>%
+  select(dateADMT, LOS2) %>%
+  collect() 
+
+LOS_date_admit_inp_summary <- LOS_date_admit_inp %>%
+group_by(dateADMT, LOS2) %>%
+   summarize(N=n()) %>%
+  mutate(dateADMT=as.Date(dateADMT),
+         dateDIS= dateADMT + LOS2)
+
+all.date_inp <- seq.Date(from=min(LOS_date_admit_inp_summary$dateADMT), to=max(LOS_date_admit_inp_summary$dateADMT), by='week')
+
+
+occupancy_inp <- pbapply::pblapply(all.date, function(x){
+  occ <-   LOS_date_admit_inp_summary %>%
+    ungroup() %>%
+    filter(dateADMT<=x & dateDIS>=x) %>%
+    summarize(occupancy=sum(N))  
+  return(occ)
+}) %>% 
+  bind_rows() 
+
+cbind.data.frame(all.date_inp,occupancy_inp) %>%
+  filter(all.date>='2016-03-01') %>%
+ggplot( aes(x=all.date_inp , y=occupancy)) +
+  geom_line() +
+  ylim(0, NA) +
+  theme_classic()
+proc.time() - ptm
+
+
+```
+RESTRICT TO AZ (state=3)
+```{r}
+
+ptm <- proc.time() 
+LOS_date_admit_inp_AZ <- pq_stream_inp %>% 
+  to_duckdb() %>%
+  filter(DSCHRGDT !='' & STATE_CD == '03' ) %>%
+   mutate(
+         dateADMT=strptime(ADMSN_DT,'%Y%m%d'),
+         dateDIS=strptime(DSCHRGDT,'%Y%m%d'),
+         LOS2 = datediff('day',dateADMT,dateDIS)
+         ) %>%
+  group_by(dateADMT) %>%
+  filter(dateADMT>='2016-01-01' & dateADMT<='2021-11-20' ) %>%
+  select(dateADMT, LOS2) %>%
+  collect() 
+
+LOS_date_admit_inp_summary_AZ <- LOS_date_admit_inp_AZ %>%
+group_by(dateADMT, LOS2) %>%
+   summarize(N=n()) %>%
+  mutate(dateADMT=as.Date(dateADMT),
+         dateDIS= dateADMT + LOS2)
+
+all.date_inp_AZ <- seq.Date(from=min(LOS_date_admit_inp_summary_AZ$dateADMT), to=max(LOS_date_admit_inp_summary_AZ$dateADMT), by='week')
+
+
+occupancy_inp_AZ <- pbapply::pblapply(all.date_inp_AZ, function(x){
+  occ <-   LOS_date_admit_inp_summary_AZ %>%
+    ungroup() %>%
+    filter(dateADMT<=x & dateDIS>=x) %>%
+    summarize(occupancy=sum(N))  
+  return(occ)
+}) %>% 
+  bind_rows() 
+
+p1 <-cbind.data.frame(all.date_inp_AZ,occupancy_inp_AZ) %>%
+  filter(all.date_inp_AZ>='2017-03-01') %>%
+ggplot( aes(x=all.date_inp_AZ , y=occupancy)) +
+  geom_line() +
+  ylim(0, NA) +
+  theme_classic()
+p1
+ggplotly(p1)
+proc.time() - ptm
+```
 
 ```{r}
-LOS_date_admit %>%
-  mutate(admt_mont=lubridate::floor_date(dateADMT, 'month')) %>%
-  group_by(admt_mont) %>%
-  summarize(LOS2_days=mean(LOS2_days)) %>%
-  ggplot(aes(x=admt_mont, y=LOS2_days))+
-  geom_line()+
-  theme_classic()
+
 ```
+
 
  
 
