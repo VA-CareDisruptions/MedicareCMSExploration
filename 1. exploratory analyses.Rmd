@@ -48,7 +48,7 @@ test2 <- pq_stream_denom %>%
   collect() #use collect() to take parquet to dataframe
 
 
-##DENOM ONLY SEEMS TO HAVE 2014-2016 DATA!
+##DENOM ONLY HAS 2014-2016 DATA--AFTER THAT SWITCHES TO THE MBSF FILE
 test3 <- pq_stream_denom %>%
   to_duckdb() %>%
   summarize(minyr=min(RFRNC_YR), maxyr=max(RFRNC_YR)) %>%
