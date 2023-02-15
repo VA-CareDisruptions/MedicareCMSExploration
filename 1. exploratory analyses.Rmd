@@ -41,6 +41,19 @@ Take a test pull from the dataset
 test1 <- pq_stream_denom %>% 
   slice_head( n = 10000) %>%
   collect() #use collect() to take parquet to dataframe
+
+
+test2 <- pq_stream_denom %>% 
+  filter(DSYSRTKY=='100009312') %>%
+  collect() #use collect() to take parquet to dataframe
+
+
+##DENOM ONLY HAS 2014-2016 DATA--AFTER THAT SWITCHES TO THE MBSF FILE
+test3 <- pq_stream_denom %>%
+  to_duckdb() %>%
+  summarize(minyr=min(RFRNC_YR), maxyr=max(RFRNC_YR)) %>%
+  collect()
+
 ```
 
 Look at age distribution of all enrollees in 2015
