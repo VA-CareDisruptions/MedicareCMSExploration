@@ -56,7 +56,7 @@ csv_stream_mbsf <- open_dataset("T:/mbsf/", format = "csv", schema = sch_dbsf) %
 
 write_dataset(csv_stream_mbsf, dest_mbsf, format = "parquet", 
                max_rows_per_file = 5e5,
-              max_open_files=20, #default is 900L
+              #max_open_files=20, #default is 900L
               hive_style = TRUE,
               existing_data_behavior = "overwrite")
 ```
@@ -64,16 +64,36 @@ write_dataset(csv_stream_mbsf, dest_mbsf, format = "parquet",
 Inpatient base files
 
 ```{r}
-dest_inp <- "T:/parquet/inp/" 
 
-csv_stream_inp <- open_dataset("T:/inp/inp1/basek2016_2021", format = "csv", schema = sch_inp_basek)  #%>%
-  #group_by(STATE_CD) #ensure chunks are not too large for memory
+csv_stream_inp_k <- open_dataset("T:/inp/inp1/basek2016_2021", format = "csv", schema = sch_inp_basek) %>%
+  dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT, starts_with('ICD'),starts_with('PRCDR'), TOT_CHRG,ADMSN_DT,TYPE_ADM,SRC_ADMS,PCCHGAMT,
+                DOB_DT, RACE_CD,CNTY_CD,STATE_CD,DSCHRGDT, UTIL_DAY, COIN_DAY,PRNCPAL_DGNS_CD)
 
-write_dataset(csv_stream_inp, dest_inp, format = "parquet", 
+csv_stream_inp_j <- open_dataset("T:/inp/inp1/basej_2014_2015", format = "csv", schema = sch_inp_basej)  %>%
+   rename_with(toupper)
+
+#common_names = intersect(names(csv_stream_inp_k), names(csv_stream_inp_j))
+
+#csv_stream_inp_k <- csv_stream_inp_k%>%
+#  dplyr::select(all_of(common_names))
+
+#csv_stream_inp_j <- csv_stream_inp_j%>%
+#  dplyr::select(all_of(common_names))
+
+write_dataset(csv_stream_inp_j, "T:/parquet/inp_j/", format = "parquet", 
                max_rows_per_file = 1e5,
               #max_open_files=20, #default is 900L
               hive_style = TRUE,
               existing_data_behavior = "overwrite")
+
+write_dataset(csv_stream_inp_k, "T:/parquet/inp_k/", format = "parquet", 
+               max_rows_per_file = 5e6,
+           #   max_open_files=20, #default is 900L
+              hive_style = TRUE,
+              existing_data_behavior = "overwrite")
+
+
+
 ```
 
 outpatient base files
@@ -82,10 +102,11 @@ outpatient base files
 dest_outp <- "T:/parquet/outp/" 
 
 csv_stream_outp <- open_dataset("T:/out/basek2016_2021", format = "csv", schema = sch_outp_basek)  %>%
-  group_by(STATE_CD) #ensure chunks are not too large for memory
+  dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT, starts_with('ICD'),starts_with('PRCDR'), TOT_CHRG,PCCHGAMT,
+                DOB_DT, RACE_CD,CNTY_CD,STATE_CD)
 
 write_dataset(csv_stream_outp, dest_outp, format = "parquet", 
-               max_rows_per_file = 5e5,
+               max_rows_per_file = 5e6,
               #max_open_files=20, #default is 900L
               hive_style = TRUE,
               existing_data_behavior = "overwrite")
