@@ -321,6 +321,70 @@ j13_line%>%
 
 ```
 
+pneumococcal codes 
+```{r}
+ptm <- proc.time()
+pneumo.line.list <- pq_stream_inp_k %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'),     
+             all_dx = paste0(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+    select(DSYSRTKY, all_dx,ADMSN_DT,DSCHRGDT,RACE_CD,  STATE_CD  ) %>%
+  filter( grepl('J13',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  collect()
+proc.time() - ptm
+
+
+p1 <- pneumo.line.list %>%
+ mutate( adate=as.Date(ADMSN_DT,'%Y%m%d'),
+         aweekdate=lubridate::floor_date(adate, 'week')
+) %>%  
+  filter(aweekdate >= '2016-01-01' & aweekdate<='2021-11-30') %>%
+  group_by(aweekdate) %>%
+  summarize(N=n()) %>%
+  ggplot(aes(x=aweekdate, y=N)) +
+  theme_classic()+
+  geom_line()+
+  ylim(0,NA)
+
+p1
+
+## multiple records per person
+pneumo.line.list %>%
+  group_by(DSYSRTKY) %>%
+  summarize(N_records=n()) %>%
+  ungroup() %>%
+  group_by(N_records) %>%
+  summarize(N=n())
+
+
+```
+
+
 RSV line list
 ```{r}
 rsv_line_list_k <- pq_stream_inp_k %>%

@@ -67,7 +67,7 @@ Inpatient base files
 
 csv_stream_inp_k <- open_dataset("T:/inp/inp1/basek2016_2021", format = "csv", schema = sch_inp_basek) %>%
   dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT, starts_with('ICD'),starts_with('PRCDR'), TOT_CHRG,ADMSN_DT,TYPE_ADM,SRC_ADMS,PCCHGAMT,
-                DOB_DT, RACE_CD,CNTY_CD,STATE_CD,DSCHRGDT, UTIL_DAY, COIN_DAY,PRNCPAL_DGNS_CD)
+               GNDR_CD,PTNTSTUS, DOB_DT, RACE_CD,CNTY_CD,STATE_CD,DSCHRGDT, UTIL_DAY, COIN_DAY,PRNCPAL_DGNS_CD)
 
 csv_stream_inp_j <- open_dataset("T:/inp/inp1/basej_2014_2015", format = "csv", schema = sch_inp_basej)  %>%
    rename_with(toupper)
