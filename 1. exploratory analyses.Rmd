@@ -364,11 +364,16 @@ p1 <- pneumo.line.list %>%
          aweekdate=lubridate::floor_date(adate, 'week')
 ) %>%  
   filter(aweekdate >= '2016-01-01' & aweekdate<='2021-11-30') %>%
+  arrange(DSYSRTKY,aweekdate) %>%
+  group_by(DSYSRTKY) %>%
+  mutate(visitN=row_number()) %>%
+  filter(visitN==1) %>%
+  ungroup() %>%
   group_by(aweekdate) %>%
   summarize(N=n()) %>%
   ggplot(aes(x=aweekdate, y=N)) +
-  theme_classic()+
-  geom_line()+
+  theme_classic() +
+  geom_line() +
   ylim(0,NA)
 
 p1
