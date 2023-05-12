@@ -422,7 +422,7 @@ rsv_line_list_k <- pq_stream_inp_k %>%
                     ICD_DGNS_CD24)
                   )%>%
  filter(grepl("B974|J121|J205|J210", all_dx)) %>%
-  select(DSYSRTKY,all_dx,adate,STATE_CD,CNTY_CD,TOT_CHRG) %>%
+  select(DSYSRTKY,all_dx,adate,STATE_CD,CNTY_CD,TOT_CHRG,PTNTSTUS) %>%
   collect()
 
 rsv_line_list_j <- pq_stream_inp_j %>%
@@ -456,7 +456,7 @@ rsv_line_list_j <- pq_stream_inp_j %>%
                     ICD_DGNS_CD24,sep='_')
                   )%>%
  filter(grepl("B974|J121|J205|J210|0796|46611|4801", all_dx)) %>%
-  select(DESY_SORT_KEY,all_dx,adate,BENE_STATE_CD,BENE_CNTY_CD,CLM_TOT_CHRG_AMT) %>%
+  select(DESY_SORT_KEY,all_dx,adate,BENE_STATE_CD,BENE_CNTY_CD,CLM_TOT_CHRG_AMT,STUS_CD) %>%
   collect() %>%
   rename(DSYSRTKY=DESY_SORT_KEY,
          STATE_CD=BENE_STATE_CD,
@@ -473,6 +473,9 @@ saveRDS(rsv_line_list,'T:/results/inp/rsv_id_dates.rds')
 ```{r, fig.width=3.5, fig.height=3}
 rsv_line_list <- readRDS('T:/results/inp/rsv_id_dates.rds')
 
+rsv_line_list %>%
+  group_by(PTNTSTUS) %>%
+ summarize(N=n())
 
 #library(cdcfluview)
 #data(hhs_regions)
