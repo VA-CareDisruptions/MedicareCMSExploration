@@ -1,0 +1,102 @@
+---
+title: "sid"
+author: "Dan Weinberger"
+date: '2023-07-21'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+---
+title: "1. exploratory analyses"
+author: "Dan Weinberger"
+date: '2023-01-05'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(arrow)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(usmap)
+library(scales)
+#library(spatstat)
+
+vircol <-  viridis_pal()(100)
+
+library(duckdb)
+library(plotly)
+library(lubridate)
+source('./R/plot.fun.R')
+source('./R/schema.R')
+state_cw <- read.csv('./Data/SSA_state_crosswalk.csv')
+#state_cw <- statepop %>% select(fips, abbr)
+state.info <- cbind.data.frame(state.name, state.abb, state.region)
+
+```
+
+## Read in the parquet database
+
+```{r} 
+pq_stream_sid <- open_dataset("Y:/ParquetData/NY", format = "parquet")
+```
+
+```{r}
+ptm <- proc.time()
+inp1 <- pq_stream_sid %>%
+  mutate(   
+             all_dx = paste(`ICD-10-CM Diagnosis 1`,
+                             `ICD-10-CM Diagnosis 2`,
+                            `ICD-10-CM Diagnosis 3`,
+                            `ICD-10-CM Diagnosis 4`,
+                            `ICD-10-CM Diagnosis 5`,
+                            `ICD-10-CM Diagnosis 6`,
+                            `ICD-10-CM Diagnosis 7`,
+                            `ICD-10-CM Diagnosis 8`,
+                            `ICD-10-CM Diagnosis 9`,
+                            `ICD-10-CM Diagnosis 10`,
+                            `ICD-10-CM Diagnosis 11`,
+                            `ICD-10-CM Diagnosis 12`,
+                            `ICD-10-CM Diagnosis 13`,
+                            `ICD-10-CM Diagnosis 14`,
+                            `ICD-10-CM Diagnosis 15`,
+                            `ICD-10-CM Diagnosis 16`,
+                            `ICD-10-CM Diagnosis 17`,
+                            `ICD-10-CM Diagnosis 18`,
+                            `ICD-10-CM Diagnosis 19`,
+                            `ICD-10-CM Diagnosis 20`,
+                            `ICD-10-CM Diagnosis 21`,
+                            `ICD-10-CM Diagnosis 22`,
+                            `ICD-10-CM Diagnosis 23`,
+                            `ICD-10-CM Diagnosis 24`,
+                            `ICD-10-CM Diagnosis 25`)
+                  )%>%
+  filter( grepl('J42',all_dx)|grepl('J43',all_dx)|grepl('J34',all_dx)) %>%
+  rename(agey =`Age in years at admission`, death=`Died during hospitalization`) %>%
+  select(all_dx, agey, death) %>%
+  collect()
+proc.time() - ptm
+```
+overall prob(death) among COPD hospitalizaions
+```{r}
+
+overall_p_death <- inp1 %>%
+  group_by(agey) %>%
+  mutate(death=as.numeric(death), agey=as.numeric(agey)) %>%
+  summarize(cfr=mean(death, na.rm=T)) %>%
+  ungroup() %>%
+  filter(agey<95)
+
+
+ggplot(overall_p_death , aes(x=agey, y=cfr)) +
+  geom_line() +
+  theme_classic()
+```
+
+
+
+
