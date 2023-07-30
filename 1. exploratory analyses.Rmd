@@ -321,8 +321,7 @@ j13_line%>%
            !grepl('A40',all_dx) & !grepl('A41',all_dx)) %>%
   group_by(PTNTSTUS,aweekdate) %>%
   summarize(N_cases=n()) %>%
-  
-  ggplot(aes(x=aweekdate, y=N_cases))+
+    ggplot(aes(x=aweekdate, y=N_cases))+
   geom_line() +
   theme_classic()+
   facet_wrap(~PTNTSTUS, scales='free_y' )
@@ -541,7 +540,7 @@ rsv1 <- rsv_line_list %>%
 ```
 
 
-```{r}
+```{r, eval=F}
 pneumonia_line_list <- pq_stream_inp_k %>%
   mutate(adate=as.Date(ADMSN_DT,'%Y%m%d'),     
              all_dx = paste0(ICD_DGNS_CD1,
@@ -583,19 +582,83 @@ any_return_hosp <- pq_stream_inp_k %>%
     filter(adate2 > adate) %>% #hospitalizations that occur AFTER pneumonia hospitalization
     summarize(N_events=n()) %>%
     collect()
-  
+```  
 
+```{r}
 pneumonia_line_list <- readRDS('T:/results/inp/J12_j18_id_dates.rds')
 
 pneu1 <- pneumonia_line_list %>%
   mutate(weekdate=floor_date(adate, 'week')) %>%
   group_by(weekdate) %>%
-  summarize(N_pneu = n() )
+  summarize(N_pneu = n() ) 
 
-ggplot(pneu1 , aes(x=weekdate, y=N_pneu)) +
+pneu1 %>%
+  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
   geom_line()+
-  theme_classic()
+  theme_classic()+
+  ylab('N J12_J18 admissions')
+
+J13_1 <- pneumonia_line_list %>%
+  filter(grepl('J13',all_dx)) %>%
+  mutate(weekdate=floor_date(adate, 'week')) %>%
+  group_by(weekdate) %>%
+  summarize(N_pneu = n() ) 
+
+J13_1 %>%
+  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic()+
+  ylab('N J13 admissions')
+
+##group by 3 digit code
+
+code_grp <- pneumonia_line_list %>%
+  mutate(weekdate=floor_date(adate, 'week'),
+    icd_cat = if_else(grepl('J13',all_dx), 'J13',
+              if_else(grepl('J14',all_dx), 'J14',
+              if_else(grepl('J15',all_dx), 'J15',
+              if_else(grepl('J16',all_dx), 'J16',
+              if_else(grepl('J17',all_dx), 'J17',
+              if_else(grepl('J18',all_dx), 'J18',
+              if_else(grepl('J12',all_dx), 'J12' , 'OTH'       
+                    )))))))
+    ) %>%
+  group_by(icd_cat,weekdate) %>%
+  summarize(N_pneu = n() ) 
   
+code_grp %>%
+  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic()+
+  facet_wrap(~icd_cat, scales='free_y') +
+  ylab('N admissions')
+
+#non-COVID
+non_covid_code_grp <- pneumonia_line_list %>%
+  filter(!grepl('J1282',all_dx)) %>%
+  mutate(weekdate=floor_date(adate, 'week'),
+    icd_cat = if_else(grepl('J13',all_dx), 'J13',
+              if_else(grepl('J14',all_dx), 'J14',
+              if_else(grepl('J15',all_dx), 'J15',
+              if_else(grepl('J16',all_dx), 'J16',
+              if_else(grepl('J17',all_dx), 'J17',
+              if_else(grepl('J18',all_dx), 'J18',
+              if_else(grepl('J12',all_dx), 'J12' , 'OTH'       
+                    )))))))
+    ) %>%
+  group_by(icd_cat,weekdate) %>%
+  summarize(N_pneu = n() ) 
+  
+non_covid_code_grp %>%
+  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic()+
+  facet_wrap(~icd_cat, scales='free_y') +
+  ylab('non-COVID N admissions')
 ```
 
 
