@@ -38,12 +38,46 @@ pq_stream_denom <- open_dataset("T:/parquet/denom/", format = "parquet", schema 
 pq_stream_inp_k <- open_dataset("T:/parquet/inp_k/", format = "parquet" ) 
 pq_stream_inp_j <- open_dataset("T:/parquet/inp_j/", format = "parquet")
 
+pq_stream_out <- open_dataset("T:/parquet/outp/", format = "parquet")
+```
+
+AZ:
+2018: 176,434
+2019: 177,798
+2020: 155,167
+2021: 148802
+```{r, eval=F}
+N_date <- pq_stream_inp_k %>%
+  group_by(ADMSN_DT,STATE_CD,TYPE_ADM) %>%
+  summarize(N=n()) %>%
+  collect()
+
+N_year <- N_date %>%
+  mutate(date= as.Date(ADMSN_DT, '%Y%m%d'),
+         year=year(date)) %>%
+  filter(STATE_CD=='03') %>% #arizona
+  group_by(year,TYPE_ADM) %>%
+  summarize(N=sum(N))
+  N_year
+  
+  
+  inp_out <- pq_stream_out %>%
+    filter(clm_thru_dt=='2018-08-24' &  bene_state_cd=='03') %>% #inpatient claims found in outpatient
+      group_by(clm_thru_dt,bene_state_cd,clm_fac_type_cd,ptnt_dschrg_stus_cd) %>%
+      summarize(N=n()) %>%
+      collect()
 
 ```
+
 
 ```{r} 
 pq_stream_snf <- open_dataset("T:/parquet/snf/", format = "parquet", schema = sch_inp_basek)
 ```
+
+```{r}
+pq_stream_snf
+```
+
 
 ## Test databases 
 
@@ -540,6 +574,8 @@ rsv1 <- rsv_line_list %>%
 ```
 
 
+
+
 ```{r, eval=F}
 pneumonia_line_list <- pq_stream_inp_k %>%
   mutate(adate=as.Date(ADMSN_DT,'%Y%m%d'),     
@@ -570,8 +606,8 @@ pneumonia_line_list <- pq_stream_inp_k %>%
                     ICD_DGNS_CD24,
                     ICD_DGNS_CD24)
                   )%>%
-  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)) %>%
-  select(DSYSRTKY,all_dx,adate) %>%
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate, STATE_CD,CNTY_CD) %>%
   collect()
 
 saveRDS(pneumonia_line_list,'T:/results/inp/J12_j18_id_dates.rds')
@@ -661,6 +697,51 @@ ggplot( aes(x=weekdate, y=N_pneu)) +
   ylab('non-COVID N admissions')
 ```
 
+Try to just break out New Haven and Fairfield counties in CT, which are part of SNIPP surveillance and AZ, where we have SID data as well to corroborate
+FIPS codes State CT: 09 County: 001, 009   
+SSA codes: 7000, 7040;
+AZ ssa code=
+```{r, eval=F}
+ct <- pneumonia_line_list %>%
+  filter(STATE_CD=='07') %>% #CT only
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate, STATE_CD) %>%
+  collect()
+
+saveRDS(ct,'T:/results/inp/J12_j18_pneumo_CT.rds')
+
+ct %>%
+ filter(grepl('J13',all_dx)) %>%
+  mutate(weekdate=floor_date(adate, 'week')) %>%
+  group_by(weekdate) %>%
+  summarize(N_pneu = n() )  %>%  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic() +
+  ylab('N admissions')
+
+
+az <- pneumonia_line_list %>%
+  filter(STATE_CD=='03') %>% #AZ only
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate, STATE_CD) %>%
+  collect()
+
+saveRDS(az,'T:/results/inp/J12_j18_pneumo_AZ.rds')
+
+az %>%
+ filter(grepl('J13',all_dx)) %>%
+  mutate(monthdate=floor_date(adate, 'year')) %>%
+  group_by(monthdate) %>%
+  summarize(N_pneu = n() )  %>%  filter(monthdate>='2017-01-01' & monthdate<='2021-12-01') %>%
+ggplot( aes(x=monthdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic() +
+  ylim(0,500) +
+  ylab('N admissions')
+
+```
+
 
 
 ```{r}
@@ -726,6 +807,10 @@ proc.time() - ptm
 ```
 
 ```{r}
+N_snf_date_state <- readRDS("T:/results/snf/N_date_state_snf.rds") %>%
+  mutate(los = N_snf_date_state -date)
+
+
 statedate_snf <- N_snf_date_state %>%
   filter(date>='2017-01-01' &date<='2021-11-20' )%>%
   mutate(STATE_CD=as.numeric(STATE_CD)) %>%
@@ -757,7 +842,7 @@ LOS in snf
 ptm <- proc.time() 
 LOS_date_admit <- pq_stream_snf %>% 
   to_duckdb() %>%
-  filter(DSCHRGDT !='') %>%
+  filter(DSCHRGDT !='') %>% #does this get rid of people who are still in hosp? (PTNTSTUS=C)
    mutate(
          dateADMT=strptime(ADMSN_DT,'%Y%m%d'),
          dateDIS=strptime(DSCHRGDT,'%Y%m%d'),
@@ -765,13 +850,31 @@ LOS_date_admit <- pq_stream_snf %>%
          ) %>%
   group_by(dateADMT) %>%
   filter(dateADMT>='2016-01-01' & dateADMT<='2021-11-20' ) %>%
-  select(dateADMT, LOS2) %>%
+  dplyr::select(dateADMT, LOS2) %>%
   collect() 
 
 proc.time() - ptm
 
 
+
 ```
+
+```{r}
+test <- LOS_date_admit %>%
+  ungroup() %>%
+  group_by(dateADMT,LOS2 ) %>%
+  summarize(N=n())
+
+plot(test$LOS2, test$N)
+
+test %>%
+  filter(dateADMT==as.Date('2016-02-01')) %>%
+  ggplot(aes(x=LOS2, y=N))+
+  geom_line() +
+  theme_classic() +
+  geom_vline(xintercept=c( 100), lty=2, col='gray', alpha=0.4)
+```
+
 
 ```{r}
 LOS_date_admit%>%
@@ -783,6 +886,8 @@ LOS_date_admit%>%
   geom_line()+
   theme_classic()
 ```
+
+
 ### Occupancy
 SNF
 ```{r}
@@ -856,6 +961,8 @@ proc.time() - ptm
 
 
 ```
+
+
 RESTRICT TO AZ (state=3)
 ```{r}
 

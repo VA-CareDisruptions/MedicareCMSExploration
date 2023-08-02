@@ -42,45 +42,110 @@ state.info <- cbind.data.frame(state.name, state.abb, state.region)
 ## Read in the parquet database
 
 ```{r} 
-pq_stream_sid <- open_dataset("Y:/ParquetData/NY", format = "parquet")
+pq_stream_sid <- open_dataset("R:/ParquetData/AZ", format = "parquet")
+
+# test1 <- pq_stream_sid %>% 
+#   slice_head( n = 10000) %>%
+#   collect() #use collect() to take parquet to dataframe
+
 ```
+
+
+How many hospitalizations in 65+ by year?
+SID/AHRQ:
+2019: 284,107
+2020:262,364
+2021: 275,424
+
+
+Compare to Medicare:
+2019: 177,798
+2020: 155,167
+2021: 148,802
+
+ATYPE
+0 =  Unknown value (but present in data)
+1 =  Emergency (2019: 105,874in Medicare vs 131,766 in SID) 24% diff
+2 =  Urgent (2019: 29,569 in Medicare vs 34,247 in SID) 16% diff
+3 =  Elective (2019: 39,394  in Medicare vs 50,391 in SID) 27% diff
+4 =  Newborn
+5 =  Trauma Center
+9=Missing ((2019: 161 in Medicare))
+
+```{r}
+N_hosp_AZ <- pq_stream_sid %>%
+  filter(AGE>=65 & YEAR>=2019 & PAY1==1) %>% # filter to where Medicare is primary payer
+  group_by(YEAR, ATYPE) %>%
+  summarize(N=n_distinct(MRN_R)) %>% #count number of unique people rather than admissions as a test
+  #summarize(N=n()) %>% #count number of unique people rather than admissions as a test
+    collect()
+
+N_hosp_AZ
+
+
+```
+
 
 ```{r}
 ptm <- proc.time()
 inp1 <- pq_stream_sid %>%
   mutate(   
-             all_dx = paste(`ICD-10-CM Diagnosis 1`,
-                             `ICD-10-CM Diagnosis 2`,
-                            `ICD-10-CM Diagnosis 3`,
-                            `ICD-10-CM Diagnosis 4`,
-                            `ICD-10-CM Diagnosis 5`,
-                            `ICD-10-CM Diagnosis 6`,
-                            `ICD-10-CM Diagnosis 7`,
-                            `ICD-10-CM Diagnosis 8`,
-                            `ICD-10-CM Diagnosis 9`,
-                            `ICD-10-CM Diagnosis 10`,
-                            `ICD-10-CM Diagnosis 11`,
-                            `ICD-10-CM Diagnosis 12`,
-                            `ICD-10-CM Diagnosis 13`,
-                            `ICD-10-CM Diagnosis 14`,
-                            `ICD-10-CM Diagnosis 15`,
-                            `ICD-10-CM Diagnosis 16`,
-                            `ICD-10-CM Diagnosis 17`,
-                            `ICD-10-CM Diagnosis 18`,
-                            `ICD-10-CM Diagnosis 19`,
-                            `ICD-10-CM Diagnosis 20`,
-                            `ICD-10-CM Diagnosis 21`,
-                            `ICD-10-CM Diagnosis 22`,
-                            `ICD-10-CM Diagnosis 23`,
-                            `ICD-10-CM Diagnosis 24`,
-                            `ICD-10-CM Diagnosis 25`)
+             all_dx = paste(I10_DX1,I10_DX2,I10_DX3,
+                            I10_DX4,
+                            I10_DX5,
+                            I10_DX6,
+                            I10_DX7,
+                            I10_DX8,
+                            I10_DX9,
+                            I10_DX10,
+                            I10_DX11,
+                            I10_DX12,
+                            I10_DX13,
+                            I10_DX14,
+                            I10_DX15,
+                            I10_DX16,
+                            I10_DX17,
+                            I10_DX18,
+                            I10_DX19,
+                            I10_DX20,
+                            I10_DX21,
+                            I10_DX22,
+                            I10_DX23,
+                            I10_DX24,
+                            I10_DX25)
                   )%>%
-  filter( grepl('J42',all_dx)|grepl('J43',all_dx)|grepl('J34',all_dx)) %>%
-  rename(agey =`Age in years at admission`, death=`Died during hospitalization`) %>%
-  select(all_dx, agey, death) %>%
+  filter( grepl('J13',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  rename(agey =AGE, death=DIED) %>%
+  dplyr::select(all_dx, agey, death, AMONTH, YEAR,ZIP) %>%
   collect()
 proc.time() - ptm
 ```
+
+```{r}
+
+j13_trends <- inp1 %>%
+  mutate(date=as.Date(paste(YEAR, AMONTH,'01', sep='-')),
+                      AZres=  substr(ZIP,1,2) %in% c('85','86'),
+         
+         j13 = if_else(grepl('J13',all_dx),"J13","Other IPD")
+         ) %>%
+  filter(agey>=65 & AZres==1) %>%
+  group_by(j13,YEAR) %>%
+  summarize(N=n())
+
+```
+
+```{r}
+j13_trends %>%
+  filter(YEAR>=2017 & j13=='J13') %>%
+ggplot(aes(x=YEAR, y=N))+
+  geom_line() +
+  theme_classic()+
+ # facet_wrap(~j13,scales='free' )+
+  ylim(0,500)
+```
+
+
 overall prob(death) among COPD hospitalizaions
 ```{r}
 
