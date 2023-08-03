@@ -74,7 +74,7 @@ ATYPE
 
 ```{r}
 N_hosp_AZ <- pq_stream_sid %>%
-  filter(AGE>=65 & YEAR>=2019 & PAY1==1) %>% # filter to where Medicare is primary payer
+  filter(AGE>=65 & YEAR>=2019 ) %>% # filter to where Medicare is primary payer if PAY1==1
   group_by(YEAR, ATYPE) %>%
   summarize(N=n_distinct(MRN_R)) %>% #count number of unique people rather than admissions as a test
   #summarize(N=n()) %>% #count number of unique people rather than admissions as a test
@@ -122,6 +122,24 @@ proc.time() - ptm
 ```
 
 ```{r}
+test1 <- inp1 %>%
+  mutate(agey=as.numeric(agey),
+         agec= if_else(agey<5, 1,
+                  if_else(agey>=5 & agey<18,2,
+                 if_else(agey>=18 & agey<40,3,
+                  if_else(agey>40 & agey<65,4,
+                  if_else(agey>=65 & agey<110,5, NA_real_
+                  )))))
+  )%>%
+  group_by(agec) %>%
+  summarize(N=n())
+
+View(test1)
+```
+
+```{r}
+
+
 
 j13_trends <- inp1 %>%
   mutate(date=as.Date(paste(YEAR, AMONTH,'01', sep='-')),
