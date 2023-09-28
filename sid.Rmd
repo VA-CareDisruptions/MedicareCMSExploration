@@ -42,11 +42,22 @@ state.info <- cbind.data.frame(state.name, state.abb, state.region)
 ## Read in the parquet database
 
 ```{r} 
-pq_stream_sid <- open_dataset("R:/ParquetData/AZ", format = "parquet")
+pq_stream_sid <- open_dataset("R:/ParquetData/AZ", format = "parquet")%>% 
+  dplyr::select(starts_with('I10_DX'), KEY,AMONTH, YEAR,ZIP, AGE,ATYPE,LOS,ZIPINC_QRTL) 
 
-# test1 <- pq_stream_sid %>% 
-#   slice_head( n = 10000) %>%
-#   collect() #use collect() to take parquet to dataframe
+pq_stream_sid_ch <- open_dataset("R:/ParquetData/AZ_chgs", format = "parquet") %>%
+   mutate(icu = if_else(is.na(`Detailed charges 10 (as received from source)`),0,1),
+         obs_rm = if_else(is.na(`Detailed charges 51 (as received from source)`),0,1)
+         ) %>%
+    rename(KEY= `HCUP record identifier`) %>%
+  dplyr::select(icu, obs_rm, KEY) %>%
+  left_join(pq_stream_sid, by='KEY')
+
+
+#4,5,20,63
+test1 <- pq_stream_sid_ch %>%
+  slice_head( n = 100) %>%
+  collect() #use collect() to take parquet to dataframe
 
 ```
 
@@ -88,7 +99,7 @@ N_hosp_AZ
 
 ```{r}
 ptm <- proc.time()
-inp1 <- pq_stream_sid %>%
+inp1 <- pq_stream_sid_ch %>%
   mutate(   
              all_dx = paste(I10_DX1,I10_DX2,I10_DX3,
                             I10_DX4,
@@ -180,6 +191,75 @@ ggplot(overall_p_death , aes(x=agey, y=cfr)) +
   theme_classic()
 ```
 
+Look at charges among pneumonia patients
+```{r}
+ptm <- proc.time()
+test1 <- pq_stream_sid_ch %>%
+  #filter(YEAR==2019 & AMONTH==1 ) %>%
+  mutate(   
+             all_dx = paste(I10_DX1,I10_DX2,I10_DX3,
+                            I10_DX4,
+                            I10_DX5,
+                            I10_DX6,
+                            I10_DX7,
+                            I10_DX8,
+                            I10_DX9,
+                            I10_DX10,
+                            I10_DX11,
+                            I10_DX12,
+                            I10_DX13,
+                            I10_DX14,
+                            I10_DX15,
+                            I10_DX16,
+                            I10_DX17,
+                            I10_DX18,
+                            I10_DX19,
+                            I10_DX20,
+                            I10_DX21,
+                            I10_DX22,
+                            I10_DX23,
+                            I10_DX24,
+                            I10_DX25)
+                  )%>%
+    filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)) %>%
+  group_by(YEAR, AMONTH,AGE, icu, obs_rm) %>%
+  collect()
+proc.time() - ptm
+
+
+test.agg <- test1 %>%
+  filter(grepl('J13',all_dx)) %>%
+  mutate(AGE=as.numeric(AGE),
+         agegrp= if_else(AGE<40,1,
+                         if_else(AGE>=40 & AGE<65,2,
+                            if_else(AGE>=65,3,999)))
+         )%>%
+  ungroup() %>%
+    group_by(YEAR , AMONTH,agegrp) %>%
+  summarize( N_cases=n(),
+             icu=sum(icu),
+             obs_rm=sum(obs_rm))
+
+test.agg2 <- test.agg %>%
+  mutate( date= as.Date(paste(YEAR,AMONTH,'01', sep='-'))
+) %>%
+  filter(agegrp %in% c(1,2,3))
+
+ggplot(test.agg2, aes(x=date, y=icu)) +
+  geom_line()+
+  theme_classic() +
+  facet_wrap(~agegrp)
+
+ggplot(test.agg2, aes(x=date, y=N_cases)) +
+  geom_line()+
+  theme_classic() +
+  facet_wrap(~agegrp)
+
+ggplot(test.agg2, aes(x=date, y=obs_rm)) +
+  geom_line()+
+  theme_classic() +
+  facet_wrap(~agegrp)
+```
 
 
 

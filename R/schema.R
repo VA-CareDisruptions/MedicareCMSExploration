@@ -948,3 +948,30 @@ sch_outp_basek = arrow::schema(
   CLM_NEXT_GNRTN_ACO_IND_CD5=string(),
   ACO_ID_NUM=string()
 )
+
+
+sch_inp_rev = arrow::schema(
+  DSYSRTKY=string(),
+  CLAIMNO=string(),
+  CLM_LN=string(),
+  THRU_DT=string(),
+  CLM_TYPE=string(),
+  REV_CNTR=string(),
+  HCPCS_CD=string(),
+  MDFR_CD1=string(),
+  MDFR_CD2=string(),
+  MDFR_CD3=string(),
+  REV_UNIT=string(),
+  REV_RATE=string(),
+  REV_CHRG=string(),
+  REV_NCVR=string(),
+  REVDEDCD=string(),
+  APCHIPPS=string(),
+  REV_CNTR_RNDRNG_PHYSN_UPIN=string(),
+  REV_CNTR_RNDRNG_PHYSN_NPI=string(),
+  REV_CNTR_RNDRNG_PHYSN_SPCLTY_CD=string(),
+  IDENDC=string(),
+  REV_CNTR_PRCNG_IND_CD=string(),
+  THRPY_CAP_IND_CD1=string(),
+  THRPY_CAP_IND_CD2=string()
+)

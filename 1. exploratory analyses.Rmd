@@ -1100,3 +1100,37 @@ fig1a
 ```
  
 
+## Proedure codes
+Example:infliximab
+The product-specific HCPCS code for Infliximab is J1745, infliximab, 10 mg. It is important to note that this code represents 1/10th of a vial. You should be sure to bill 10 units of J1745 on the claim form when indicating that a single 100-mg vial of Infliximab was used.
+1 vial = 10 units
+2 vials = 20 units
+3 vials = 30 units
+Medicare uses CPT codes 96413 and 96415 to describe the first and subsequent hours, respectively, of the infusion procedure associated with therapy with Infliximab in the physician office setting. Commercial payers may use these codes or alternate codes 96365 and 96366.
+
+```{r}
+# 
+# # Generate a comma-separated list of columns that start with 'icd_prc'
+# icd_prc_columns <- (column_names[grep("^ICD_PRCDR", column_names)])
+# 
+# test <- pq_stream_inp_k %>% 
+#   dplyr::select( ADMSN_DT,ICD_PRCDR_CD1:ICD_PRCDR_CD25) %>%
+#   filter(ADMSN_DT=='20200204') %>%
+#    collect()
+#    # mutate(all_pcd = paste(starts_with("ICD_PRCDR_CD"),'_') )
+
+test1 <-  open_dataset("T:/inp/inp2/", format = "csv", schema=sch_inp_rev)
+
+#7236 total:
+test2 <-  test1 %>% 
+  filter(grepl('J1745',HCPCS_CD)|grepl('96413',HCPCS_CD)|grepl('96415',HCPCS_CD)|grepl('96365',HCPCS_CD)|grepl('96366',HCPCS_CD) | grepl('Q5103',HCPCS_CD)|grepl('Q5104',HCPCS_CD)|grepl('Q5109',HCPCS_CD)|grepl('Q5121',HCPCS_CD)) %>%
+  collect()
+
+#only 38 people with this code, only 87899 found'
+uad_tests <-  test1 %>% 
+  filter(grepl('87899',HCPCS_CD)|grepl('16786',HCPCS_CD)|grepl('183009',HCPCS_CD)) %>%
+  collect()
+```
+
+
+
