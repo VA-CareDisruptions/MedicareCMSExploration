@@ -245,6 +245,18 @@ test.agg2 <- test.agg %>%
 ) %>%
   filter(agegrp %in% c(1,2,3))
 
+test1 %>%
+  filter(grepl('J13',all_dx)) %>%
+  mutate(AGE=as.numeric(AGE),
+         agegrp= if_else(AGE<40,1,
+                         if_else(AGE>=40 & AGE<65,2,
+                            if_else(AGE>=65,3,999)))
+         )%>%
+  ungroup() %>%
+    group_by(agegrp,YEAR )  %>%
+  mutate(LOS=as.numeric(LOS)) %>%
+  summarize(los=mean(LOS , na.rm=T))
+
 ggplot(test.agg2, aes(x=date, y=icu)) +
   geom_line()+
   theme_classic() +
