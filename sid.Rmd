@@ -39,11 +39,14 @@ state.info <- cbind.data.frame(state.name, state.abb, state.region)
 
 ```
 
+## TODO
+Try to analyze trends by facility; try to pull out Med/Surg separately
+
 ## Read in the parquet database
 
 ```{r} 
-pq_stream_sid <- open_dataset("R:/ParquetData/AZ", format = "parquet")%>% 
-  dplyr::select(starts_with('I10_DX'), KEY,AMONTH, YEAR,ZIP, AGE,ATYPE,LOS,ZIPINC_QRTL) 
+pq_stream_sid <- open_dataset("R:/ParquetData/AZ", format = "parquet")#%>% 
+  #dplyr::select(starts_with('I10_DX'), KEY,AMONTH, YEAR,ZIP, AGE,ATYPE,LOS,ZIPINC_QRTL,MRN_R) 
 
 pq_stream_sid_ch <- open_dataset("R:/ParquetData/AZ_chgs", format = "parquet") %>%
    mutate(icu = if_else(is.na(`Detailed charges 10 (as received from source)`),0,1),
@@ -55,9 +58,10 @@ pq_stream_sid_ch <- open_dataset("R:/ParquetData/AZ_chgs", format = "parquet") %
 
 
 #4,5,20,63
-test1 <- pq_stream_sid_ch %>%
-  slice_head( n = 100) %>%
-  collect() #use collect() to take parquet to dataframe
+# test1 <- pq_stream_sid_ch %>%
+#   slice_head( n = 100) %>%
+#   collect() #use collect() to take parquet to dataframe
+
 
 ```
 
@@ -83,17 +87,106 @@ ATYPE
 5 =  Trauma Center
 9=Missing ((2019: 161 in Medicare))
 
-```{r}
+```{r, fig.width=6, fig.height=4}
 N_hosp_AZ <- pq_stream_sid %>%
-  filter(AGE>=65 & YEAR>=2019 ) %>% # filter to where Medicare is primary payer if PAY1==1
+      mutate(AGE = if_else(AGE %in% c('','C'),NA_character_,AGE),
+      AGE=as.numeric(AGE), 
+         YEAR=as.numeric(YEAR)) %>%
+  filter(AGE>=65) %>%
   group_by(YEAR, ATYPE) %>%
-  summarize(N=n_distinct(MRN_R)) %>% #count number of unique people rather than admissions as a test
-  #summarize(N=n()) %>% #count number of unique people rather than admissions as a test
+  summarize(N=n_distinct(MRN_R)) %>% #count number of unique people 
     collect()
+```
 
-N_hosp_AZ
+```{r, fig.width=6, fig.height=3}
+ds.fig <- N_hosp_AZ %>%
+  arrange(ATYPE, YEAR) %>%
+  filter(ATYPE %in% c(1,2,3,4,5)) %>%
+  mutate(admit_type =factor(ATYPE, c(1,2,3,4,5), c('Emergency','Urgent', 'Elective','Newborn','Trauma Center')))
+
+ggplot(ds.fig, aes(x=YEAR, y=N)) +
+  geom_line() +
+  theme_classic() +
+  facet_wrap(~admit_type,scales='free')
+```
+
+By county
+```{r, fig.width=6, fig.height=4}
+N_hosp_cnty <- pq_stream_sid %>%
+      mutate(AGE = if_else(AGE %in% c('','C'),NA_character_,AGE),
+      AGE=as.numeric(AGE), 
+         YEAR=as.numeric(YEAR)) %>%
+  filter(AGE>=65) %>%
+  group_by(YEAR, ZIPINC_QRTL) %>%
+  summarize(N=n_distinct(MRN_R)) %>% #count number of unique people 
+    collect()
+```
+
+```{r}
+ggplot(N_hosp_cnty, aes(x=YEAR, y=N)) +
+  geom_line() +
+  theme_classic() +
+  facet_wrap(~ZIPINC_QRTL,scales='free')
+```
 
 
+```{r, fig.width=4, fig.height=2.5}
+N_hosp_AZ_tot <- pq_stream_sid %>%
+      mutate(AGE = if_else(AGE %in% c('','C'),NA_character_,AGE),
+      AGE=as.numeric(AGE), 
+         YEAR=as.numeric(YEAR)) %>%
+  filter(AGE>=65) %>%
+    group_by(YEAR) %>%
+  summarize(N=n_distinct(MRN_R)) %>% #count number of unique people 
+    collect() %>%
+  ungroup()
+
+ggplot(N_hosp_AZ_tot, aes(x=YEAR, y=N)) +
+  geom_line() +
+  theme_classic() 
+```
+los dist
+```{r}
+los1 <- pq_stream_sid %>%
+      mutate(AGE = if_else(AGE %in% c('','C'),NA_character_,AGE),
+      AGE=as.numeric(AGE), 
+         YEAR=as.numeric(YEAR)) %>%
+  filter(AGE>=65) %>%
+  dplyr::select(YEAR, LOS) %>%
+    collect() %>%
+  ungroup()
+
+los1 %>% 
+  mutate(LOS=as.numeric(LOS)) %>%
+ggplot( aes( x=LOS)) +
+  geom_histogram() +
+  xlim(0,30)+
+  theme_classic() +
+  facet_wrap(~YEAR)
+```
+
+LOS
+```{r}
+los <- pq_stream_sid %>%
+      mutate(AGE = if_else(AGE %in% c('','C'),NA_character_,AGE),
+      AGE=as.numeric(AGE), 
+      LOS = if_else(LOS %in% c('','C'),NA_character_,LOS),
+      LOS=as.numeric(LOS),
+         YEAR=as.numeric(YEAR)) %>%
+  filter(AGE>=65) %>%
+    group_by(YEAR) %>%
+  summarize(LOS_mean=mean(LOS, na.rm=T), LOS_median=median(LOS, na.rm=T)) %>% #
+    collect() %>%
+  ungroup()
+
+
+ggplot(los, aes(x=YEAR, y=LOS_median)) +
+  geom_line() +
+  theme_classic() 
+
+ggplot(los, aes(x=YEAR, y=LOS_mean)) +
+  geom_line() +
+  theme_classic() 
 ```
 
 
