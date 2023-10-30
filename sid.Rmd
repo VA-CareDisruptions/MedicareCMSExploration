@@ -7,17 +7,6 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
-
----
-title: "1. exploratory analyses"
-author: "Dan Weinberger"
-date: '2023-01-05'
-output: html_document
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
 library(arrow)
 library(tidyr)
 library(dplyr)
@@ -50,11 +39,13 @@ pq_stream_sid <- open_dataset("R:/ParquetData/AZ", format = "parquet")#%>%
 
 pq_stream_sid_ch <- open_dataset("R:/ParquetData/AZ_chgs", format = "parquet") %>%
    mutate(icu = if_else(is.na(`Detailed charges 10 (as received from source)`),0,1),
-         obs_rm = if_else(is.na(`Detailed charges 51 (as received from source)`),0,1)
+         obs_rm = if_else(is.na(`Detailed charges 51 (as received from source)`),0,1),
+         med_surg = if_else(is.na(`Detailed charges 17 (as received from source)`),0,1)
          ) %>%
     rename(KEY= `HCUP record identifier`) %>%
-  dplyr::select(icu, obs_rm, KEY) %>%
-  left_join(pq_stream_sid, by='KEY')
+  dplyr::select(icu, obs_rm, med_surg, KEY) 
+
+
 
 
 #4,5,20,63
@@ -65,6 +56,55 @@ pq_stream_sid_ch <- open_dataset("R:/ParquetData/AZ_chgs", format = "parquet") %
 
 ```
 
+
+
+```{r}
+basic.info <- pq_stream_sid %>%
+  dplyr::select(KEY, YEAR)
+
+med_surg_trend <- pq_stream_sid_ch %>%
+  left_join(basic.info, by='KEY') %>%
+   group_by(med_surg, YEAR) %>%
+  #filter(med_surg==1) %>%
+   summarize(N=n()) %>%
+     collect() 
+
+ggplot(med_surg_trend, aes(x=YEAR, y=N)) +
+  geom_line() + geom_point()+
+  theme_classic()+
+  geom_vline(xintercept = 2019.5)+
+  facet_wrap(~med_surg)+
+  ggtitle("Trends for Med/surg and other")
+
+obs_trend <- pq_stream_sid_ch %>%
+  left_join(basic.info, by='KEY') %>%
+   group_by(obs_rm, YEAR) %>%
+  #filter(med_surg==1) %>%
+   summarize(N=n()) %>%
+     collect() 
+
+ggplot(obs_trend, aes(x=YEAR, y=N)) +
+  geom_line() + geom_point()+
+  theme_classic()+
+  geom_vline(xintercept = 2019.5)+
+  facet_wrap(~obs_rm, scales='free') +
+    ggtitle("Trends for Observation services")
+
+icu_trend <- pq_stream_sid_ch %>%
+  left_join(basic.info, by='KEY') %>%
+   group_by(icu, YEAR) %>%
+  #filter(med_surg==1) %>%
+   summarize(N=n()) %>%
+     collect() 
+
+ggplot(icu_trend, aes(x=YEAR, y=N)) +
+  geom_line() + geom_point()+
+  theme_classic()+
+  geom_vline(xintercept = 2019.5)+
+  facet_wrap(~icu, scales='free') +
+    ggtitle("Trends for ICU")
+
+```
 
 How many hospitalizations in 65+ by year?
 SID/AHRQ:
@@ -129,21 +169,22 @@ ggplot(N_hosp_cnty, aes(x=YEAR, y=N)) +
   facet_wrap(~ZIPINC_QRTL,scales='free')
 ```
 
-
+Med surg vs not
 ```{r, fig.width=4, fig.height=2.5}
-N_hosp_AZ_tot <- pq_stream_sid %>%
+N_hosp_AZ_tot <- pq_stream_sid_ch %>%
       mutate(AGE = if_else(AGE %in% c('','C'),NA_character_,AGE),
       AGE=as.numeric(AGE), 
          YEAR=as.numeric(YEAR)) %>%
   filter(AGE>=65) %>%
-    group_by(YEAR) %>%
+    group_by(med_surg,YEAR) %>%
   summarize(N=n_distinct(MRN_R)) %>% #count number of unique people 
     collect() %>%
   ungroup()
 
 ggplot(N_hosp_AZ_tot, aes(x=YEAR, y=N)) +
   geom_line() +
-  theme_classic() 
+  theme_classic() +
+  facet_wrap(~med_surge, scales='free')
 ```
 los dist
 ```{r}
@@ -187,6 +228,24 @@ ggplot(los, aes(x=YEAR, y=LOS_median)) +
 ggplot(los, aes(x=YEAR, y=LOS_mean)) +
   geom_line() +
   theme_classic() 
+```
+## by facility
+```{r}
+hosp_discharges_yr <- pq_stream_sid_ch %>%
+  group_by(DSHOSPID, YEAR) %>%
+  summarize(N_yr =n()) %>%
+  collect() %>%
+  ungroup() %>%
+    group_by(DSHOSPID) %>%
+      mutate(n_discharges = sum(N_yr)) %>%
+  ungroup()
+
+hosp_discharges_yr %>%
+  filter(n_discharges>=100000) %>%
+  ggplot( aes(x=YEAR, y=N_yr)) +
+  geom_line() +
+  theme_classic() +
+  facet_wrap(~DSHOSPID,scales='free')
 ```
 
 
