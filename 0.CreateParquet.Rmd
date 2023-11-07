@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(arrow)
 library(dplyr)
 library(ggplot2)
-
+library(parquetize)
 source('./R/schema.R')
  
 ```
@@ -43,7 +43,7 @@ write_dataset(csv_stream_denom, dest_denom, format = "parquet",
 
 Do the same for MBSF data
 
-Note on partioning: 
+Note on partitioning: 
 "Avoid files smaller than 20MB and larger than 2GB.
 Avoid partitioning layouts with more than 10,000 distinct partitions."
 https://ursalabs.org/arrow-r-nightly/articles/dataset.html
@@ -65,9 +65,9 @@ Inpatient base files
 
 ```{r}
 
-csv_stream_inp_k <- open_dataset("T:/inp/inp1/basek2016_2021", format = "csv", schema = sch_inp_basek) %>%
-  dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT, starts_with('ICD'),starts_with('PRCDR'), TOT_CHRG,ADMSN_DT,TYPE_ADM,SRC_ADMS,PCCHGAMT,
-               GNDR_CD,PTNTSTUS, DOB_DT, RACE_CD,CNTY_CD,STATE_CD,DSCHRGDT, UTIL_DAY, COIN_DAY,PRNCPAL_DGNS_CD)
+csv_stream_inp_k <- open_dataset("T:/inp/inp1/basek2016_2021", format = "csv", schema = sch_inp_basek) #%>%
+ # dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT, starts_with('ICD'),starts_with('PRCDR'), TOT_CHRG,ADMSN_DT,TYPE_ADM,SRC_ADMS,PCCHGAMT,
+             #  GNDR_CD,PTNTSTUS, DOB_DT, RACE_CD,CNTY_CD,STATE_CD,DSCHRGDT, UTIL_DAY, COIN_DAY,PRNCPAL_DGNS_CD)
 
 csv_stream_inp_j <- open_dataset("T:/inp/inp1/basej_2014_2015", format = "csv", schema = sch_inp_basej)  %>%
    rename_with(toupper)
@@ -86,12 +86,11 @@ write_dataset(csv_stream_inp_j, "T:/parquet/inp_j/", format = "parquet",
               hive_style = TRUE,
               existing_data_behavior = "overwrite")
 
-write_dataset(csv_stream_inp_k, "T:/parquet/inp_k/", format = "parquet", 
+write_dataset(csv_stream_inp_k, "T:/parquet/inp_k_alt/", format = "parquet", 
                max_rows_per_file = 5e6,
            #   max_open_files=20, #default is 900L
               hive_style = TRUE,
               existing_data_behavior = "overwrite")
-
 
 
 ```
