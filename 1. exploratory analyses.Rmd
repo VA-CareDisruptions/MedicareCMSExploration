@@ -12,6 +12,8 @@ library(tidyr)
 library(dplyr)
 library(ggplot2)
 library(usmap)
+library(ggalluvial)
+
 library(scales)
 library(spatstat)
 
@@ -31,14 +33,53 @@ state.info <- cbind.data.frame(state.name, state.abb, state.region)
 ## Read in the parquet database
 
 ```{r} 
-pq_stream_denom <- open_dataset("T:/parquet/denom/", format = "parquet", schema = sch_denom)
+pq_stream_denom <- open_dataset("T:/parquet/denom/", format = "parquet")
 ```
 
 ```{r} 
-pq_stream_inp_k <- open_dataset("T:/parquet/inp_k/", format = "parquet" ) 
+pq_stream_inp_k <- open_dataset("T:/parquet/inp_k_alt/", format = "parquet" ) 
 pq_stream_inp_j <- open_dataset("T:/parquet/inp_j/", format = "parquet")
 
 pq_stream_out <- open_dataset("T:/parquet/outp/", format = "parquet")
+
+pq_stream_charge_k_inp <- open_dataset("T:/parquet/inp_k_chg/", format = "parquet" ) 
+```
+
+Type adm
+0 =  Unknown value (but present in data)
+1 =  Emergency
+2 =  Urgent
+3 =  Elective
+4 =  Newborn
+5 =  Trauma Center
+9 =  Unknown - Information not available
+
+SRC_adm
+0 = ANOMALY: invalid value, if present, translate to '9'
+1 = Non-Health Care Facility Point of Origin (Physician Referral) - The patient was admitted to this facility upon an order of a physician.
+2 = Clinic referral - The patient was admitted upon the recommendation of this facility's clinic physician.
+3 = HMO referral - Reserved for national Prior to 3/08, HMO referral - The patient was admitted upon the recommendation of an health maintenance organization (HMO) physician.
+4 = Transfer from hospital (Different Facility) - The patient was admitted to this facility as a hospital transfer from an acute care facility where he or she was an inpatient.
+5 = Transfer from a skilled nursing facility (SNF) or Intermediate Care Facility (ICF) - The patient was admitted to this facility as a transfer from a SNF or ICF where he or she was a resident.
+6 = Transfer from another health care facility - The patient was admitted to this facility as a transfer from another type of health care facility not defined elsewhere in this code list where he or she was an inpatient.
+7 = Emergency room - The patient was admitted to this facility after receiving services in this facility's emergency room department.
+8 = Court/law enforcement - The patient was admitted upon the direction of a court of law or upon the request of a law enforcement agency's representative.
+9 = Information not available - The means by which the patient was admitted is not known.
+
+```{r}
+source_and_type <- pq_stream_inp_k %>%
+  dplyr::select(SRC_ADMS,TYPE_ADM) %>%
+  group_by(SRC_ADMS,TYPE_ADM) %>%
+  summarize(N=n()) %>%
+  collect()
+
+discharge_status <- pq_stream_inp_k %>%
+  dplyr::select(STUS_CD) %>%
+  group_by(STUS_CD) %>%
+  summarize(N=n())%>%
+  collect()
+
+
 ```
 
 AZ:
@@ -100,6 +141,17 @@ test3 <- pq_stream_denom %>%
   collect()
 
 ```
+
+```{r}
+test2 <- pq_stream_charge_k_inp %>%
+  filter(THRU_DT=='20190701') %>%
+  group_by(HCPCS_CD) %>%
+  summarize(N=n()) %>%
+  collect()
+
+
+```
+
 
 Look at age distribution of all enrollees in 2015
 should be ~54 million enrollees in 2015 (58.6 million in 2021)..
@@ -171,13 +223,14 @@ statedate%>%
   ylim(0,NA) +
   geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
 ```
+
 mean Length of stay (LOS)
 ```{r}
 ptm <- proc.time()
 LOS_trends <- pq_stream_inp_k %>%
   mutate(LOS = UTIL_DAY + COIN_DAY) %>%
   group_by(ADMSN_DT) %>%
-  summarize(LOS = mean(LOS)) %>%
+  summarize(LOS = mean(LOS), N=n()) %>%
   collect() %>%
   mutate(date=as.Date(ADMSN_DT,'%Y%m%d'), weekdate=lubridate::floor_date(date, 'week')) %>%  
   ungroup() %>%
@@ -197,7 +250,167 @@ LOS_trends %>%
   geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
 ```
 
-National, by chapter
+## LoS by source of admission and destination fo discharge
+
+
+NOTE: To identify Inpatient claims that originated in ED: https://resdac.org/articles/how-identify-hospital-claims-emergency-room-visits-medicare-claims-data
+In summary, to find ER visits:
+
+Outpatient files:  Revenue Center Codes 0450-0459, 0981
+Inpatient files:  Revenue Center Codes 0450-0459, 0981
+Although one can assume ER patients found in the inpatient data were admitted to the hospital, one cannot assume ER patients found in the outpatient data were not admitted to the hospital. Because some patients are transferred to a different hospital for admission and some hospitals bill ER and inpatient services separately, determining admission status for those ER visits found in the Outpatient file requires linking to the inpatient data to find evidence of an admission. Please note charges for one ER visit will be found in either the Outpatient claims or the Inpatient claims; a visit will not generate ER charges on both an inpatient claim and an outpatient claim.
+
+mean Length of stay (LOS)
+
+SRC_ADMS
+"0 = ANOMALY: invalid value, if present, translate to '9'
+1 = Non-Health Care Facility Point of Origin (Physician Referral) - The patient was admitted to this facility upon an order of a physician.
+2 = Clinic referral - The patient was admitted upon the recommendation of this facility's clinic physician.
+3 = HMO referral - Reserved for national Prior to 3/08, HMO referral - The patient was admitted upon the recommendation of an health maintenance organization (HMO) physician.
+4 = Transfer from hospital (Different Facility) - The patient was admitted to this facility as a hospital transfer from an acute care facility where he or she was an inpatient.
+5 = Transfer from a skilled nursing facility (SNF) or Intermediate Care Facility (ICF) - The patient was admitted to this facility as a transfer from a SNF or ICF where he or she was a resident.
+6 = Transfer from another health care facility - The patient was admitted to this facility as a transfer from another type of health care facility not defined elsewhere in this code list where he or she was an inpatient.
+7 = Emergency room - The patient was admitted to this facility after receiving services in this facility's emergency room department.
+8 = Court/law enforcement - The patient was admitted upon the direction of a court of law or upon the request of a law enforcement agency's representative.
+9 = Information not available - The means by which the patient was admitted is not known.
+"D = Transfer from hospital inpatient in the same facility resulting in a separate claim to the payer - The patient was admitted to this facility as a transfer from hospital inpatient within this facility resulting in a separate claim to the payer.
+
+```{r, eval=F}
+ptm <- proc.time()
+LOS_trends_src <- pq_stream_inp_k %>%
+  mutate(LOS = UTIL_DAY + COIN_DAY) %>%
+  group_by(ADMSN_DT,SRC_ADMS,STUS_CD) %>%
+  summarize(LOS = mean(LOS), N=n()) %>%
+  collect() %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'), monthdate=lubridate::floor_date(date, 'month')) %>%  
+  ungroup() %>%
+  group_by(SRC_ADMS,STUS_CD,monthdate) %>%
+  summarize(LOS = mean(LOS), N=sum(N)) 
+
+saveRDS(LOS_trends_src,"T:/results/inp/LOS_date_src.rds")
+
+proc.time() - ptm
+
+
+```
+
+```{r, fig.width=9, fig.height=4}
+LOS_trends_src <- readRDS("T:/results/inp/LOS_date_src.rds")
+
+LOS_trends_src %>%
+  filter(monthdate>='2017-01-01' &monthdate<='2021-11-20' & N>1000 & STUS_CD %in% c('01','02','03','04','06','62'))%>%
+  mutate( source = factor(SRC_ADMS ,c('1','2','3','4','5','6','8','9','D'), labels=c('Physician referral (non-healthcare facility)','Clinic referral', 'HMO referral', 'Other hospital', 'SNF','Other healthcare facility','Court/Law','Missing','Within hospital transfer')),
+          Discharge_to = factor(STUS_CD, c('01','02','03','04','06','62'), c('Home','Short term hospital','SNF', 'Intermediate care', 'HHA home care','IPT rehab'))
+          ) %>%
+   ggplot(aes(x=monthdate, y=LOS, group=source, col=source, linetype=source))+
+  geom_line()+
+  facet_wrap(~Discharge_to)+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+
+
+
+#alluvial plot of patient flows
+# LOS_trends_src %>%
+#   group_by(SRC_ADMS, STUS_CD) %>%
+#   summarize(N=sum(N))%>%
+# 
+# ggplot(d1.m, aes(x=season, stratum=variable,alluvium=variable,fill=variable,label=variable, y = value)) +
+#   scale_fill_brewer(type = "qual", palette = "Set2") +
+#   geom_flow(stat = "alluvium", lode.guidance = "frontback",
+#             color = "darkgray") +
+#   theme_classic()  +
+#   facet_wrap(~Gender)
+```
+
+Alluvial plot
+```{r, fig.width=10}
+LOS_flows <- readRDS("T:/results/inp/LOS_date_src.rds") %>%
+   group_by(SRC_ADMS, STUS_CD) %>%
+   summarize(N=sum(N)) %>%
+  filter(SRC_ADMS %in% c('1','2','3','4','5','6','7','8','9','D')) %>%
+  ungroup() %>%
+  mutate( discharge= if_else(STUS_CD %in% c('01','08'), 'Home',
+                     if_else(STUS_CD %in% c('03'), 'SNF',
+                     if_else(STUS_CD %in% c('02','04','05','09','43','51','61','62','63','64','65','66','70','71','72'), 'Other Healthcare', 
+                     if_else(STUS_CD %in% c('20','40','41','42','50','51') , 'Die/Hospice', 'Other')))),
+          discharge=as.factor(discharge)
+          ) %>%
+  mutate(   SRC_ADMS2 = if_else(SRC_ADMS %in% c('8','9','D'),'99',SRC_ADMS ),
+           source = factor(SRC_ADMS2 ,c('1','2','3','4','5','6','7','99'), labels=c('Physician referral (non-healthcare facility)','Clinic referral', 'HMO referral', 'Other hospital', 'SNF','Other healthcare facility','ED','Other'))
+         )%>%
+  group_by(discharge, source ) %>%
+  summarize(N=sum(N)) %>%
+  ungroup() %>%
+  mutate(cohort=row_number())
+
+ggplot(LOS_flows,
+       aes(y = N, axis1 = source, axis2 = discharge)) +
+  geom_alluvium(aes(fill = source), width = 1/12) +
+  geom_stratum(width = 1/12, fill = "black", color = "grey") +
+  geom_label(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("Source", "Discharge"), expand = c(.05, .05)) +
+  scale_fill_brewer(type = "qual", palette = "Set1") +
+  ggtitle("Sources of admission and destination of Discharges, Medicare") +
+  theme_classic()
+```
+
+What happened to all the admissions form the ED--are these in the outpatient folder? see resdac info above--can use revenue center codes to ID ED admissions
+
+```{r}
+n_loc_out <- pq_stream_out %>%
+  filter(clm_thru_dt=='2020-06-05') %>% #filter to 1 date
+  dplyr::select(ptnt_dschrg_stus_cd,nch_clm_type_cd) %>%
+ group_by(ptnt_dschrg_stus_cd,nch_clm_type_cd) %>%
+  summarize(N=n()) %>%
+  collect()
+
+n_loc_out
+
+n_attending_out <- pq_stream_out %>%
+  filter(clm_thru_dt=='2020-06-05') %>% #filter to 1 date
+  dplyr::select(at_physn_spclty_cd) %>%
+ group_by(at_physn_spclty_cd) %>%
+  summarize(N=n()) %>%
+  collect() %>%
+  arrange(-N)
+
+n_attending_out #93=emergency med
+
+#justlook at emergency med people
+n_loc_out2 <- pq_stream_out %>%
+  filter(clm_thru_dt=='2020-06-05' & at_physn_spclty_cd=='93') %>% #filter to 1 date
+  dplyr::select(ptnt_dschrg_stus_cd,nch_clm_type_cd) %>%
+ group_by(ptnt_dschrg_stus_cd,nch_clm_type_cd) %>%
+  summarize(N=n()) %>%
+  collect() %>%
+  arrange(-N)
+
+n_loc_out2
+
+
+```
+
+
+need to find people from both outpatient and inpatient files with an ED code, then reconcile
+```{r}
+inp_ed_codes <- pq_stream_charge_k_inp %>%
+  dplyr::select(DSYSRTKY,REV_CNTR) %>%
+  filter( (REV_CNTR >='0450' & REV_CNTR<= '0459')| REV_CNTR=='0981' )#%>%
+  #collect()
+
+
+#which people had an inpatient claim?
+inp_ids <- pq_stream_inp_k %>%
+  dplyr::select(DSYSRTKY) %>%
+    collect() %>%
+  pull(DSYSRTKY) %>%
+  unique() 
+saveRDS(inp_ids,'./Data/unique_inpatient_ids_k.rds')
+```
+
+## National, by chapter
 ```{r, fig.width=10, fig.height=9}
 statedate%>%
    group_by(princ_icd_chapt,weekdate) %>%
