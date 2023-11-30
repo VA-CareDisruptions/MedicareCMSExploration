@@ -1,0 +1,1167 @@
+---
+title: "1. exploratory analyses"
+author: "Dan Weinberger"
+date: '2023-01-05'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(arrow)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(usmap)
+library(scales)
+library(spatstat)
+
+vircol <-  viridis_pal()(100)
+
+library(duckdb)
+library(plotly)
+library(lubridate)
+source('./R/plot.fun.R')
+source('./R/schema.R')
+state_cw <- read.csv('./Data/SSA_state_crosswalk.csv')
+#state_cw <- statepop %>% select(fips, abbr)
+state.info <- cbind.data.frame(state.name, state.abb, state.region)
+
+```
+
+## Read in the parquet database
+
+```{r} 
+pq_stream_denom <- open_dataset("T:/parquet/denom/", format = "parquet", schema = sch_denom)
+```
+
+```{r} 
+pq_stream_inp_k <- open_dataset("T:/parquet/inp_k/", format = "parquet" , schema=sch_inp_basek) 
+pq_stream_inp_j <- open_dataset("T:/parquet/inp_j/", format = "parquet", schema=sch_inp_basej)
+
+#pq_stream_out <- open_dataset("T:/parquet/outp/", format = "parquet", schema=sch_outp_basek)
+```
+
+AZ:
+2018: 176,434
+2019: 177,798
+2020: 155,167
+2021: 148802
+```{r, eval=F}
+N_date <- pq_stream_inp_k %>%
+  group_by(ADMSN_DT,STATE_CD,TYPE_ADM) %>%
+  summarize(N=n()) %>%
+  collect()
+
+N_year <- N_date %>%
+  mutate(date= as.Date(ADMSN_DT, '%Y%m%d'),
+         year=year(date)) %>%
+  filter(STATE_CD=='03') %>% #arizona
+  group_by(year,TYPE_ADM) %>%
+  summarize(N=sum(N))
+  N_year
+  
+  
+  inp_out <- pq_stream_out %>%
+    filter(clm_thru_dt=='2018-08-24' &  bene_state_cd=='03') %>% #inpatient claims found in outpatient
+      group_by(clm_thru_dt,bene_state_cd,clm_fac_type_cd,ptnt_dschrg_stus_cd) %>%
+      summarize(N=n()) %>%
+      collect()
+
+```
+
+
+```{r} 
+pq_stream_snf <- open_dataset("T:/parquet/snf/", format = "parquet", schema = sch_inp_basek)
+```
+
+```{r}
+pq_stream_snf
+```
+
+
+## Test databases 
+
+Take a test pull from the dataset
+```{r}
+test1 <- pq_stream_denom %>% 
+  slice_head( n = 10000) %>%
+  collect() #use collect() to take parquet to dataframe
+
+
+test2 <- pq_stream_denom %>% 
+  filter(DSYSRTKY=='100009312') %>%
+  collect() #use collect() to take parquet to dataframe
+
+
+##DENOM ONLY HAS 2014-2016 DATA--AFTER THAT SWITCHES TO THE MBSF FILE
+test3 <- pq_stream_denom %>%
+  to_duckdb() %>%
+  summarize(minyr=min(RFRNC_YR), maxyr=max(RFRNC_YR)) %>%
+  collect()
+
+```
+
+Look at age distribution of all enrollees in 2015
+should be ~54 million enrollees in 2015 (58.6 million in 2021)..
+
+to run on the csv_stream takes 151 seconds
+to run on the parquet data stream takes 22 seconds
+```{r}
+ptm <- proc.time()
+N_age2 <- pq_stream_denom %>% 
+  filter(AGE>=65 & RFRNC_YR==15) %>%
+  select(AGE,RFRNC_YR) %>%
+group_by(AGE) %>%
+  summarize(N_obs = n()) %>% #use collect() to take parquet to dataframe
+    collect()
+
+proc.time() - ptm
+
+ggplot(N_age2, aes(x=AGE, y=N_obs)) +
+  geom_line()+
+  theme_classic()
+```
+
+
+```{r}
+test <-pq_stream_inp_k %>%
+slice_head( n = 50) %>%
+  collect() 
+```
+
+## Number of inpatient admissions by week, nationally
+
+Break out by week and ICD chapter AND region
+```{r,eval=F}
+#runs in 2.5 min
+ptm <- proc.time()
+N_chapter_date_state <- pq_stream_inp_k %>%
+  mutate(princ_icd_chapt =substr(ICD_DGNS_CD1,1,1)) %>%
+  group_by(princ_icd_chapt,ADMSN_DT,STATE_CD) %>%
+  summarize(N_cases = n()) %>%
+  collect() %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d')) 
+saveRDS(N_chapter_date_state,"T:/results/inp/N_chapter_date_state.rds")
+proc.time() - ptm
+```
+
+
+```{r}
+N_chapter_date_state <- readRDS("T:/results/inp/N_chapter_date_state.rds")
+
+statedate <- N_chapter_date_state %>%
+  filter(date>='2016-01-01' &date<='2021-11-20' )%>%
+  mutate(STATE_CD=as.numeric(STATE_CD)) %>%
+  left_join(state_cw, by=c('STATE_CD'='STATE_SSA')) %>%
+left_join(state.info,by=c('STATENAME'='state.name')) %>%
+  mutate(weekdate=lubridate::floor_date(date, 'week')) %>%
+  group_by(princ_icd_chapt,state.region,weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+  ungroup()
+```
+
+National, all causes
+```{r}
+statedate%>%
+   group_by(weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+    ggplot(aes(x=weekdate, y=N_cases))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+
+mean Length of stay (LOS)
+```{r}
+ptm <- proc.time()
+LOS_trends <- pq_stream_inp_k %>%
+  mutate(LOS = UTIL_DAY + COIN_DAY) %>%
+  group_by(ADMSN_DT) %>%
+  summarize(LOS = mean(LOS), N=n()) %>%
+  collect() %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'), weekdate=lubridate::floor_date(date, 'week')) %>%  
+  ungroup() %>%
+  group_by(weekdate) %>%
+  summarize(LOS = mean(LOS)) 
+saveRDS(LOS_trends,"T:/results/inp/LOS_date.rds")
+
+proc.time() - ptm
+
+
+LOS_trends %>%
+  filter(weekdate>='2017-01-01' &weekdate<='2021-11-20' )%>%
+ ggplot(aes(x=weekdate, y=LOS))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+
+LoS by source of admission and destination fo discharge
+
+mean Length of stay (LOS)
+```{r}
+ptm <- proc.time()
+LOS_trends_src <- pq_stream_inp_k %>%
+  dplyr::select(UTIL_DAY,COIN_DAY,ADMSN_DT,SRC_ADMS,STUS_CD) %>%
+  mutate(LOS = UTIL_DAY + COIN_DAY) %>%
+  group_by(ADMSN_DT,SRC_ADMS,STUS_CD) %>%
+  summarize(LOS = mean(LOS), N=n()) %>%
+  collect() %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'), monthdate=lubridate::floor_date(date, 'month')) %>%  
+  ungroup() %>%
+  group_by(monthdate,SRC_ADMS,STUS_CD) %>%
+  summarize(LOS = mean(LOS), N=sum(N)) #this should be weigted mean, not straight mean 
+
+saveRDS(LOS_trends_src,"T:/results/inp/LOS_date_src.rds")
+
+proc.time() - ptm
+
+
+LOS_trends_src %>%
+  filter(weekdate>='2017-01-01' &weekdate<='2021-11-20' )%>%
+ ggplot(aes(x=weekdate, y=LOS))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+
+National, by chapter
+```{r, fig.width=10, fig.height=9}
+statedate%>%
+   group_by(princ_icd_chapt,weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+    ggplot(aes(x=weekdate, y=N_cases))+
+  facet_wrap(~princ_icd_chapt, scales='free_y') +
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+
+Same but filter by region (Northeast, North Central, South, West
+)
+```{r}
+statedate%>%
+  filter(state.region=='West') %>%
+  ggplot(aes(x=weekdate, y=N_cases))+
+  geom_line()+
+  facet_wrap(~princ_icd_chapt, scales='free_y') +
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+
+```
+
+
+NOTE This is currently ALL pneumonia; not just community-acquired (present on admission)
+
+```{r}
+ptm <- proc.time()
+inp1 <- pq_stream_inp_k %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'),     
+             all_dx = paste0(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)) %>%
+  group_by(date) %>%
+  summarize(J12_18=n()) %>%
+  collect()
+proc.time() - ptm
+
+inp1 %>%
+  arrange(date) %>%
+  filter(date>='2017-01-01') %>%
+  ggplot(aes( x=date, y=J12_18) )+
+  geom_line()+
+  theme_classic()
+  
+ptm <- proc.time()
+#takes about 10 min to run
+j12_18_line <- pq_stream_inp_k %>%
+  #slice_head( n = 50) %>%
+  mutate(#adate=as.Date(ADMSN_DT,'%Y%m%d'),
+        # ddate = as.Date(DSCHRGDT,'%Y%m%d'),
+             all_dx = paste(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)) %>%
+  select(DSYSRTKY, all_dx,ADMSN_DT,DSCHRGDT,GNDR_CD,RACE_CD, CNTY_CD, STATE_CD ,starts_with('CLM_POA_IND'),PTNTSTUS ) %>%
+  collect()
+proc.time() - ptm
+
+j13_line <- j12_18_line %>%
+  filter( grepl('J13',all_dx)) %>%
+  mutate(adate=as.Date(ADMSN_DT,'%Y%m%d'),
+         ddate=as.Date(DSCHRGDT,'%Y%m%d'),
+         aweekdate=lubridate::floor_date(adate, 'week'),
+         dweekdate=lubridate::floor_date(ddate, 'week'),
+         LOS= as.numeric(difftime(ddate, adate, units='days' )),
+         LOS=as.numeric(LOS),
+         LOS_grp = if_else(LOS %in% c(0,1),1,
+                        if_else(LOS>=2 & LOS<=6,2,
+                        if_else(LOS>=7 & LOS<=13,3,
+                        if_else(LOS>=14 ,4,999))))
+  )
+
+hist(j13_line$LOS)
+
+#Group by alive/dead
+j13_line%>%
+  group_by(PTNTSTUS,aweekdate) %>%
+  summarize(N_cases=n()) %>%
+  filter(PTNTSTUS %in% c('A','B')) %>%
+  ggplot(aes(x=aweekdate, y=N_cases))+
+  geom_line() +
+  theme_classic()+
+  facet_wrap(~PTNTSTUS, scales='free_y' )+
+  ggtitle('Trend in those that die vs survive J13')
+
+#Group by LOS
+
+j13_line%>%
+  group_by(LOS_grp,aweekdate) %>%
+  summarize(N_cases=n()) %>%
+  filter(LOS_grp %in% c(1,2,3,4)) %>%
+  mutate(LOS_grp=as.factor(LOS_grp)) %>%
+  ggplot(aes(x=aweekdate, y=N_cases))+
+  geom_line() +
+  theme_classic()+
+  facet_wrap(~LOS_grp, scales='free_y' )+
+  ylim(0,NA) +
+  ggtitle('Trend in long vs short duration stay, J13')
+
+j13_line%>%
+  filter(PTNTSTUS %in% c('A','B') &
+           !grepl('A40',all_dx) & !grepl('A41',all_dx)) %>%
+  group_by(PTNTSTUS,aweekdate) %>%
+  summarize(N_cases=n()) %>%
+    ggplot(aes(x=aweekdate, y=N_cases))+
+  geom_line() +
+  theme_classic()+
+  facet_wrap(~PTNTSTUS, scales='free_y' )
+
+```
+
+pneumococcal codes 
+```{r}
+ptm <- proc.time()
+pneumo.line.list <- pq_stream_inp_k %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d'),     
+             all_dx = paste0(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+    select(DSYSRTKY, all_dx,ADMSN_DT,DSCHRGDT,RACE_CD,  STATE_CD  ) %>%
+  filter( grepl('J13',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  collect()
+proc.time() - ptm
+
+
+p1 <- pneumo.line.list %>%
+ mutate( adate=as.Date(ADMSN_DT,'%Y%m%d'),
+         aweekdate=lubridate::floor_date(adate, 'week')
+) %>%  
+  filter(aweekdate >= '2016-01-01' & aweekdate<='2021-11-30') %>%
+  arrange(DSYSRTKY,aweekdate) %>%
+  group_by(DSYSRTKY) %>%
+  mutate(visitN=row_number()) %>%
+  filter(visitN==1) %>%
+  ungroup() %>%
+  group_by(aweekdate) %>%
+  summarize(N=n()) %>%
+  ggplot(aes(x=aweekdate, y=N)) +
+  theme_classic() +
+  geom_line() +
+  ylim(0,NA)
+
+p1
+
+## multiple records per person
+pneumo.line.list %>%
+  group_by(DSYSRTKY) %>%
+  summarize(N_records=n()) %>%
+  ungroup() %>%
+  group_by(N_records) %>%
+  summarize(N=n())
+
+
+```
+
+
+RSV line list
+```{r}
+rsv_line_list_k <- pq_stream_inp_k %>%
+  mutate(adate=as.Date(ADMSN_DT,'%Y%m%d'),     
+             all_dx = paste(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+ filter(grepl("B974|J121|J205|J210", all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate,STATE_CD,CNTY_CD,TOT_CHRG,PTNTSTUS) %>%
+  collect()
+
+rsv_line_list_j <- pq_stream_inp_j %>%
+   rename_with(toupper) %>%
+  mutate(adate=as.Date(CLM_ADMSN_DT,'%Y%m%d'),     
+             all_dx = paste(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24,sep='_')
+                  )%>%
+ filter(grepl("B974|J121|J205|J210|0796|46611|4801", all_dx)) %>%
+  select(DESY_SORT_KEY,all_dx,adate,BENE_STATE_CD,BENE_CNTY_CD,CLM_TOT_CHRG_AMT,STUS_CD) %>%
+  collect() %>%
+  rename(DSYSRTKY=DESY_SORT_KEY,
+         STATE_CD=BENE_STATE_CD,
+         CNTY_CD = BENE_CNTY_CD,
+         TOT_CHRG = CLM_TOT_CHRG_AMT) %>%
+  mutate(DSYSRTKY=as.numeric(DSYSRTKY))
+
+rsv_line_list <- bind_rows(rsv_line_list_j, rsv_line_list_k)
+
+saveRDS(rsv_line_list,'T:/results/inp/rsv_id_dates.rds')
+
+```
+
+```{r, fig.width=3.5, fig.height=3}
+rsv_line_list <- readRDS('T:/results/inp/rsv_id_dates.rds')
+
+rsv_line_list %>%
+  group_by(PTNTSTUS) %>%
+ summarize(N=n())
+
+#library(cdcfluview)
+#data(hhs_regions)
+
+rsv1 <- rsv_line_list %>%
+  mutate(weekdate=floor_date(adate, 'week')) %>%
+ # filter(weekdate>='2017-01-01') %>%
+  group_by(STATE_CD,weekdate) %>%
+  summarize(N_rsv = n() ) %>%
+  mutate(STATE_CD=as.numeric(STATE_CD),
+         week=week(weekdate),
+         year=year(weekdate),
+         epiyr = if_else(week>=27,year, year-1)) %>%
+  ungroup() %>%
+  group_by(STATE_CD, epiyr) %>%
+  mutate( RSV_adj = N_rsv/sum(N_rsv)) %>%
+  ungroup() %>%
+  group_by(STATE_CD) %>%
+  mutate(       mov_ave_RSV = zoo::rollapply(N_rsv, align='center',FUN=mean, width=53,  partial=T),
+                RSV_adj_movave =N_rsv/mov_ave_RSV ) %>%
+  left_join(state_cw, by=c('STATE_CD'='STATE_SSA'))  %>%
+  mutate(STATENAME = if_else( STATENAME=='New York', 'NY', STATENAME))
+
+rsv1 %>%
+  filter(STATENAME %in% c('Florida','NY') & epiyr>=2014) %>%
+ggplot( aes(x=weekdate, y=RSV_adj_movave, group=STATENAME, color=STATENAME)) +
+  geom_line(show.legend = FALSE)+
+  theme_classic()+
+  ylab('RSV Hospitalizations (adjusted)')+
+  xlab('') +
+    directlabels::geom_dl(aes(label = STATENAME), method = "smart.grid")
+
+rsv1 %>%
+  filter(STATENAME %in% c('Florida','NY') & epiyr>=2014) %>%
+ggplot( aes(x=weekdate, y=N_rsv, group=STATENAME, color=STATENAME)) +
+  geom_line(show.legend = FALSE)+
+  theme_classic()+
+  ylab('RSV Hospitalizations (unadjusted)')+
+  xlab('') +
+    directlabels::geom_dl(aes(label = STATENAME), method = "smart.grid")
+
+
+ggplot(rsv_line_list , aes(x=log(TOT_CHRG))) +
+  geom_histogram()+
+  theme_classic()+
+  ylab('charges')
+
+
+rsv1 <- rsv_line_list %>%
+  mutate(weekdate=floor_date(adate, 'week')) %>%
+  
+ # filter(weekdate>='2017-01-01') %>%
+  group_by(weekdate) %>%
+  summarize(N_rsv = n() )
+```
+
+
+
+
+```{r, eval=F}
+pneumonia_line_list <- pq_stream_inp_k %>%
+  mutate(adate=as.Date(ADMSN_DT,'%Y%m%d'),     
+             all_dx = paste0(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate, STATE_CD,CNTY_CD) %>%
+  collect()
+
+saveRDS(pneumonia_line_list,'T:/results/inp/J12_j18_id_dates.rds')
+
+any_return_hosp <- pq_stream_inp_k %>%
+  mutate(adate2=as.Date(ADMSN_DT,'%Y%m%d')) %>%     
+  right_join(pneumonia_line_list , by='DSYSRTKY') %>%
+    filter(adate2 > adate) %>% #hospitalizations that occur AFTER pneumonia hospitalization
+    summarize(N_events=n()) %>%
+    collect()
+```  
+
+```{r}
+pneumonia_line_list <- readRDS('T:/results/inp/J12_j18_id_dates.rds')
+
+pneu1 <- pneumonia_line_list %>%
+  mutate(weekdate=floor_date(adate, 'week')) %>%
+  group_by(weekdate) %>%
+  summarize(N_pneu = n() ) 
+
+pneu1 %>%
+  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic()+
+  ylab('N J12_J18 admissions')
+
+J13_1 <- pneumonia_line_list %>%
+  filter(grepl('J13',all_dx)) %>%
+  mutate(weekdate=floor_date(adate, 'week')) %>%
+  group_by(weekdate) %>%
+  summarize(N_pneu = n() ) 
+
+J13_1 %>%
+  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic()+
+  ylab('N J13 admissions')
+
+##group by 3 digit code
+
+code_grp <- pneumonia_line_list %>%
+  mutate(weekdate=floor_date(adate, 'week'),
+    icd_cat = if_else(grepl('J13',all_dx), 'J13',
+              if_else(grepl('J14',all_dx), 'J14',
+              if_else(grepl('J15',all_dx), 'J15',
+              if_else(grepl('J16',all_dx), 'J16',
+              if_else(grepl('J17',all_dx), 'J17',
+              if_else(grepl('J18',all_dx), 'J18',
+              if_else(grepl('J12',all_dx), 'J12' , 'OTH'       
+                    )))))))
+    ) %>%
+  group_by(icd_cat,weekdate) %>%
+  summarize(N_pneu = n() ) 
+  
+code_grp %>%
+  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic()+
+  facet_wrap(~icd_cat, scales='free_y') +
+  ylab('N admissions')
+
+#non-COVID
+non_covid_code_grp <- pneumonia_line_list %>%
+  filter(!grepl('J1282',all_dx)) %>%
+  mutate(weekdate=floor_date(adate, 'week'),
+    icd_cat = if_else(grepl('J13',all_dx), 'J13',
+              if_else(grepl('J14',all_dx), 'J14',
+              if_else(grepl('J15',all_dx), 'J15',
+              if_else(grepl('J16',all_dx), 'J16',
+              if_else(grepl('J17',all_dx), 'J17',
+              if_else(grepl('J18',all_dx), 'J18',
+              if_else(grepl('J12',all_dx), 'J12' , 'OTH'       
+                    )))))))
+    ) %>%
+  group_by(icd_cat,weekdate) %>%
+  summarize(N_pneu = n() ) 
+  
+non_covid_code_grp %>%
+  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic()+
+  facet_wrap(~icd_cat, scales='free_y') +
+  ylab('non-COVID N admissions')
+```
+
+Try to just break out New Haven and Fairfield counties in CT, which are part of SNIPP surveillance and AZ, where we have SID data as well to corroborate
+FIPS codes State CT: 09 County: 001, 009   
+SSA codes: 7000, 7040;
+AZ ssa code=
+```{r, eval=F}
+ct <- pneumonia_line_list %>%
+  filter(STATE_CD=='07') %>% #CT only
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate, STATE_CD) %>%
+  collect()
+
+saveRDS(ct,'T:/results/inp/J12_j18_pneumo_CT.rds')
+
+ct %>%
+ filter(grepl('J13',all_dx)) %>%
+  mutate(weekdate=floor_date(adate, 'week')) %>%
+  group_by(weekdate) %>%
+  summarize(N_pneu = n() )  %>%  filter(weekdate>='2017-01-01' & weekdate<='2021-12-01') %>%
+ggplot( aes(x=weekdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic() +
+  ylab('N admissions')
+
+
+az <- pneumonia_line_list %>%
+  filter(STATE_CD=='03') %>% #AZ only
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate, STATE_CD) %>%
+  collect()
+
+saveRDS(az,'T:/results/inp/J12_j18_pneumo_AZ.rds')
+
+az %>%
+ filter(grepl('J13',all_dx)) %>%
+  mutate(monthdate=floor_date(adate, 'year')) %>%
+  group_by(monthdate) %>%
+  summarize(N_pneu = n() )  %>%  filter(monthdate>='2017-01-01' & monthdate<='2021-12-01') %>%
+ggplot( aes(x=monthdate, y=N_pneu)) +
+  geom_line()+
+  theme_classic() +
+  ylim(0,500) +
+  ylab('N admissions')
+
+```
+
+
+
+```{r}
+ptm <- proc.time()
+N_age_die <- pq_stream_denom %>%
+  filter(DEATH_DT != '') %>%
+  select(AGE,RFRNC_YR) %>%
+  filter(RFRNC_YR==15) %>%
+group_by(AGE) %>%
+  summarize(N_deaths = n()) %>% #use collect() to take parquet to dataframe
+    collect()
+
+proc.time() - ptm
+
+ggplot(N_age_die, aes(x=AGE, y=N_deaths)) +
+  geom_line()
+```
+
+probability of death per year
+```{r}
+death_rate <- N_age2 %>%
+  filter(AGE>=65) %>%
+  left_join(N_age_die, by='AGE') %>%
+  mutate( N_deaths = ifelse(is.na(N_deaths),0,N_deaths),
+    death_rate= N_deaths/N_obs 
+    ) 
+
+  ggplot( death_rate, aes(x=AGE, y=death_rate)) +
+  geom_line() +
+    theme_classic()
+
+```
+
+
+## skilled nursing trend
+
+test pull
+```{r}
+test2 <- pq_stream_snf %>% 
+  slice_head( n = 100) %>%
+  collect() #use collect() to take parquet to dataframe
+```
+
+```{r,eval=F}
+#20151210 ADMSN_DT  WATCH OUT FOR DUPLICATES  ADMSN_DT DSCHRGDT
+#runs ~5 min
+ptm <- proc.time()
+N_snf_date_state <- pq_stream_snf |> 
+    to_duckdb() |> #convert to duckdb database to allow for row_number
+  select(DSYSRTKY,ADMSN_DT,ADMSN_DT,STATE_CD,DSCHRGDT) %>%
+  group_by(DSYSRTKY,ADMSN_DT) %>%
+  collect() %>%
+  mutate(record_N=row_number()) %>% #removes duplicates
+  ungroup() %>%
+  filter(record_N==1) %>%
+  group_by(ADMSN_DT,STATE_CD) %>%
+  summarize(N_cases = n()) %>%
+  #collect() %>%
+  mutate(date=as.Date(ADMSN_DT,'%Y%m%d')) 
+
+saveRDS(N_snf_date_state,"T:/results/snf/N_date_state_snf.rds")
+proc.time() - ptm
+```
+
+```{r}
+N_snf_date_state <- readRDS("T:/results/snf/N_date_state_snf.rds") %>%
+  mutate(los = N_snf_date_state -date)
+
+
+statedate_snf <- N_snf_date_state %>%
+  filter(date>='2017-01-01' &date<='2021-11-20' )%>%
+  mutate(STATE_CD=as.numeric(STATE_CD)) %>%
+  left_join(state_cw, by=c('STATE_CD'='STATE_SSA')) %>%
+left_join(state.info,by=c('STATENAME'='state.name')) %>%
+  mutate(weekdate=lubridate::floor_date(date, 'week')) %>%
+  group_by(state.region,weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+  ungroup()
+
+```
+
+
+```{r}
+statedate_snf%>%
+   group_by(weekdate) %>%
+  summarize(N_cases=sum(N_cases)) %>%
+    ggplot(aes(x=weekdate, y=N_cases))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA) +
+  geom_vline(xintercept=as.Date(c('2020-03-15','2020-12-15','2021-08-15')), lty=2, col='gray')
+```
+
+LOS in snf
+
+45 sec!
+```{r}
+ptm <- proc.time() 
+LOS_date_admit <- pq_stream_snf %>% 
+  to_duckdb() %>%
+  filter(DSCHRGDT !='') %>% #does this get rid of people who are still in hosp? (PTNTSTUS=C)
+   mutate(
+         dateADMT=strptime(ADMSN_DT,'%Y%m%d'),
+         dateDIS=strptime(DSCHRGDT,'%Y%m%d'),
+         LOS2 = datediff('day',dateADMT,dateDIS)
+         ) %>%
+  group_by(dateADMT) %>%
+  filter(dateADMT>='2016-01-01' & dateADMT<='2021-11-20' ) %>%
+  dplyr::select(dateADMT, LOS2) %>%
+  collect() 
+
+proc.time() - ptm
+
+
+
+```
+
+```{r}
+test <- LOS_date_admit %>%
+  ungroup() %>%
+  group_by(dateADMT,LOS2 ) %>%
+  summarize(N=n())
+
+plot(test$LOS2, test$N)
+
+test %>%
+  filter(dateADMT==as.Date('2016-02-01')) %>%
+  ggplot(aes(x=LOS2, y=N))+
+  geom_line() +
+  theme_classic() +
+  geom_vline(xintercept=c( 100), lty=2, col='gray', alpha=0.4)
+```
+
+
+```{r}
+LOS_date_admit%>%
+   mutate(aweekdate= lubridate::floor_date(dateADMT,'week')) %>%
+  ungroup() %>%
+      group_by(aweekdate) %>% 
+    summarize(LOS2=mean(LOS2)) %>%
+  ggplot(aes(x=aweekdate, y=LOS2))+
+  geom_line()+
+  theme_classic()
+```
+
+
+### Occupancy
+SNF
+```{r}
+los_date_admit_summary <- LOS_date_admit%>%
+    group_by(dateADMT, LOS2) %>%
+   summarize(N=n()) %>%
+  mutate(dateADMT=as.Date(dateADMT),
+         dateDIS= dateADMT + LOS2)
+
+all.date <- seq.Date(from=min(los_date_admit_summary$dateADMT), to=max(los_date_admit_summary$dateADMT), by='week')
+
+
+occupancy <- pbapply::pblapply(all.date, function(x){
+  occ <-   los_date_admit_summary %>%
+    ungroup() %>%
+    filter(dateADMT<=x & dateDIS>=x) %>%
+    summarize(occupancy=sum(N))  
+  return(occ)
+}) %>% 
+  bind_rows() 
+
+cbind.data.frame(all.date,occupancy) %>%
+  filter(all.date>='2016-03-01') %>%
+ggplot( aes(x=all.date , y=occupancy)) +
+  geom_line() +
+  ylim(0, NA) +
+  theme_classic()
+
+```
+Inpatients
+```{r}
+ptm <- proc.time() 
+LOS_date_admit_inp <- pq_stream_inp_k %>% 
+  to_duckdb() %>%
+  filter(DSCHRGDT !='') %>%
+   mutate(
+         dateADMT=strptime(ADMSN_DT,'%Y%m%d'),
+         dateDIS=strptime(DSCHRGDT,'%Y%m%d'),
+         LOS2 = datediff('day',dateADMT,dateDIS)
+         ) %>%
+  group_by(dateADMT) %>%
+  filter(dateADMT>='2016-01-01' & dateADMT<='2021-11-20' ) %>%
+  select(dateADMT, LOS2) %>%
+  collect() 
+
+LOS_date_admit_inp_summary <- LOS_date_admit_inp %>%
+group_by(dateADMT, LOS2) %>%
+   summarize(N=n()) %>%
+  mutate(dateADMT=as.Date(dateADMT),
+         dateDIS= dateADMT + LOS2)
+
+all.date_inp <- seq.Date(from=min(LOS_date_admit_inp_summary$dateADMT), to=max(LOS_date_admit_inp_summary$dateADMT), by='week')
+
+
+occupancy_inp <- pbapply::pblapply(all.date, function(x){
+  occ <-   LOS_date_admit_inp_summary %>%
+    ungroup() %>%
+    filter(dateADMT<=x & dateDIS>=x) %>%
+    summarize(occupancy=sum(N))  
+  return(occ)
+}) %>% 
+  bind_rows() 
+
+cbind.data.frame(all.date_inp,occupancy_inp) %>%
+  filter(all.date>='2016-03-01') %>%
+ggplot( aes(x=all.date_inp , y=occupancy)) +
+  geom_line() +
+  ylim(0, NA) +
+  theme_classic()
+proc.time() - ptm
+
+
+```
+
+
+RESTRICT TO AZ (state=3)
+```{r}
+
+ptm <- proc.time() 
+LOS_date_admit_inp_AZ <- pq_stream_inp_k %>% 
+  to_duckdb() %>%
+  filter(DSCHRGDT !='' & STATE_CD == '03' ) %>%
+   mutate(
+         dateADMT=strptime(ADMSN_DT,'%Y%m%d'),
+         dateDIS=strptime(DSCHRGDT,'%Y%m%d'),
+         LOS2 = datediff('day',dateADMT,dateDIS)
+         ) %>%
+  group_by(dateADMT) %>%
+  filter(dateADMT>='2016-01-01' & dateADMT<='2021-11-20' ) %>%
+  select(dateADMT, LOS2) %>%
+  collect() 
+
+LOS_date_admit_inp_summary_AZ <- LOS_date_admit_inp_AZ %>%
+group_by(dateADMT, LOS2) %>%
+   summarize(N=n()) %>%
+  mutate(dateADMT=as.Date(dateADMT),
+         dateDIS= dateADMT + LOS2)
+
+all.date_inp_AZ <- seq.Date(from=min(LOS_date_admit_inp_summary_AZ$dateADMT), to=max(LOS_date_admit_inp_summary_AZ$dateADMT), by='week')
+
+
+occupancy_inp_AZ <- pbapply::pblapply(all.date_inp_AZ, function(x){
+  occ <-   LOS_date_admit_inp_summary_AZ %>%
+    ungroup() %>%
+    filter(dateADMT<=x & dateDIS>=x) %>%
+    summarize(occupancy=sum(N))  
+  return(occ)
+}) %>% 
+  bind_rows() 
+
+p1 <-cbind.data.frame(all.date_inp_AZ,occupancy_inp_AZ) %>%
+  filter(all.date_inp_AZ>='2017-03-01') %>%
+ggplot( aes(x=all.date_inp_AZ , y=occupancy)) +
+  geom_line() +
+  ylim(0, NA) +
+  theme_classic()
+p1
+ggplotly(p1)
+proc.time() - ptm
+```
+
+```{r}
+
+```
+
+## LEgionella OR pneumonia
+
+```{r}
+
+ptm <- proc.time()
+#takes about 10 min to run
+j12_18_line <- pq_stream_inp_k %>%
+  #slice_head( n = 50) %>%
+  mutate(#adate=as.Date(ADMSN_DT,'%Y%m%d'),
+        # ddate = as.Date(DSCHRGDT,'%Y%m%d'),
+             all_dx = paste(ICD_DGNS_CD1,
+                         ICD_DGNS_CD1,
+                         ICD_DGNS_CD2,
+                         ICD_DGNS_CD3,
+                         ICD_DGNS_CD4,
+                         ICD_DGNS_CD5,
+                         ICD_DGNS_CD6,
+                         ICD_DGNS_CD7,
+                         ICD_DGNS_CD8,
+                         ICD_DGNS_CD9,
+                         ICD_DGNS_CD10,
+                         ICD_DGNS_CD11,
+                         ICD_DGNS_CD12,
+                         ICD_DGNS_CD13,
+                         ICD_DGNS_CD14,
+                         ICD_DGNS_CD15,
+                         ICD_DGNS_CD16,
+                         ICD_DGNS_CD17,
+                    ICD_DGNS_CD18,
+                    ICD_DGNS_CD19,
+                    ICD_DGNS_CD20,
+                    ICD_DGNS_CD21,
+                    ICD_DGNS_CD22,
+                    ICD_DGNS_CD23,
+                    ICD_DGNS_CD24,
+                    ICD_DGNS_CD24)
+                  )%>%
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A481',all_dx)|grepl('A482',all_dx)) %>%
+  select(DSYSRTKY, all_dx,ADMSN_DT,DSCHRGDT,GNDR_CD,RACE_CD, CNTY_CD, STATE_CD ,starts_with('CLM_POA_IND'),PTNTSTUS ) %>%
+  collect() %>%
+  mutate( legionella = if_else(grepl('A481',all_dx)|grepl('A482',all_dx) , 1, 0))
+proc.time() - ptm
+
+
+legionella <- j12_18_line %>% filter(legionella==1) 
+
+leg_codes <- write.csv(legionella,'./Data/legionella_codes.csv')
+
+
+legionella %>% mutate(icd3 =substr(all_dx,1,3)) %>%
+  group_by(icd3) %>%
+  summarize(N=n()) %>%
+  arrange(-N)
+
+
+View(legionella %>%
+  group_by(STATE_CD) %>%
+  summarize(N=n()) %>%
+  mutate(STATE_CD=as.numeric(STATE_CD)) %>%
+  arrange(-N) %>%
+  rename(STATE_SSA=STATE_CD) %>%
+  left_join(state_cw, by='STATE_SSA'))
+
+county_cw <- read.csv('./Data/ssa_fips_state_county2015.csv') %>%
+  select(ssacounty, fipscounty)
+
+county_leg <- legionella %>%
+  mutate(ssacounty=paste0(STATE_CD,CNTY_CD)) %>%
+  group_by(ssacounty) %>%
+  summarize(N_leg=n()) %>%
+  as.data.frame() %>%
+  mutate(ssacounty=as.numeric(ssacounty)) %>%
+  left_join(county_cw, by=c('ssacounty'='ssacounty')) %>%
+    mutate(fipscounty=as.character(fipscounty),
+           fipscounty= stringr::str_pad(fipscounty, 5, pad = "0") ) %>%
+  full_join(countypop, by=c('fipscounty'='fips')) %>%
+  mutate( N_leg = if_else(is.na(N_leg),0,N_leg) , inc_leg = N_leg/pop_2015*100000 ) %>%
+  filter(!is.na(inc_leg)) %>%
+  rename(fips=fipscounty)
+
+
+fig1a <- plot.fun(ds=county_leg,plotvar='inc_leg', maintitle='', subtitle='', roundscale = 1,plot.cuts='weighted_quantile')
+
+fig1a
+```
+ 
+
+## Proedure codes
+Example:infliximab
+The product-specific HCPCS code for Infliximab is J1745, infliximab, 10 mg. It is important to note that this code represents 1/10th of a vial. You should be sure to bill 10 units of J1745 on the claim form when indicating that a single 100-mg vial of Infliximab was used.
+1 vial = 10 units
+2 vials = 20 units
+3 vials = 30 units
+Medicare uses CPT codes 96413 and 96415 to describe the first and subsequent hours, respectively, of the infusion procedure associated with therapy with Infliximab in the physician office setting. Commercial payers may use these codes or alternate codes 96365 and 96366.
+
+```{r}
+# 
+# # Generate a comma-separated list of columns that start with 'icd_prc'
+# icd_prc_columns <- (column_names[grep("^ICD_PRCDR", column_names)])
+# 
+# test <- pq_stream_inp_k %>% 
+#   dplyr::select( ADMSN_DT,ICD_PRCDR_CD1:ICD_PRCDR_CD25) %>%
+#   filter(ADMSN_DT=='20200204') %>%
+#    collect()
+#    # mutate(all_pcd = paste(starts_with("ICD_PRCDR_CD"),'_') )
+
+test1 <-  open_dataset("T:/inp/inp2/", format = "csv", schema=sch_inp_rev)
+
+#7236 total:
+test2 <-  test1 %>% 
+  filter(grepl('J1745',HCPCS_CD)|grepl('96413',HCPCS_CD)|grepl('96415',HCPCS_CD)|grepl('96365',HCPCS_CD)|grepl('96366',HCPCS_CD) | grepl('Q5103',HCPCS_CD)|grepl('Q5104',HCPCS_CD)|grepl('Q5109',HCPCS_CD)|grepl('Q5121',HCPCS_CD)) %>%
+  collect()
+
+#only 38 people with this code, only 87899 found'
+uad_tests <-  test1 %>% 
+  filter(grepl('87899',HCPCS_CD)|grepl('16786',HCPCS_CD)|grepl('183009',HCPCS_CD)) %>%
+  collect()
+```
+
+
+

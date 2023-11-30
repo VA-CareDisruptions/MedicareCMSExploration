@@ -95,23 +95,46 @@ write_dataset(csv_stream_inp_k, "T:/parquet/inp_k_alt/", format = "parquet",
 
 ```
 
-outpatient base files
+
+Inpatient charge files
 
 ```{r}
-dest_outp <- "T:/parquet/outp/" 
+csv_stream_inp_k_chg <- open_dataset("T:/inp/inp2/", format = "csv", schema = sch_inp_rev) 
 
-csv_stream_outp <- open_dataset("T:/out/basek2016_2021", format = "csv", schema = sch_outp_basek)  %>%
-  dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT, starts_with('ICD'),starts_with('PRCDR'), TOT_CHRG,PCCHGAMT,
-                DOB_DT, RACE_CD,CNTY_CD,STATE_CD)
-
-write_dataset(csv_stream_outp, dest_outp, format = "parquet", 
+write_dataset(csv_stream_inp_k_chg, "T:/parquet/inp_k_chg/", format = "parquet", 
                max_rows_per_file = 5e6,
-              #max_open_files=20, #default is 900L
+           #   max_open_files=20, #default is 900L
               hive_style = TRUE,
               existing_data_behavior = "overwrite")
+
 ```
 
 
+
+
+outpatient base files
+```{r, eval=F}
+csv_stream_outp_k <- open_dataset("T:/out/basek2016_2021/", format = "csv", schema = sch_outp_basek)
+
+# write_dataset(csv_stream_outp_k, "T:/parquet/outp_k/", format = "parquet", 
+#                max_rows_per_file = 5e6,
+#               hive_style = TRUE,
+#               existing_data_behavior = "overwrite")
+
+```
+
+outpatient charge files
+
+```{r}
+
+csv_stream_outp_charge <- open_dataset("T:/out/charge_k", format = "csv", schema = sch_outp_rev)%>%
+  dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT,CLM_TYPE,REV_CNTR)
+
+write_dataset(csv_stream_outp_charge, "T:/parquet/outp_k_charge/" , format = "parquet", 
+               max_rows_per_file = 5e6,
+              hive_style = TRUE,
+              existing_data_behavior = "overwrite")
+```
 
 Skilled nursing
 

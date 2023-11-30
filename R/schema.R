@@ -366,6 +366,8 @@ sch_inp_basek = arrow::schema(
   )
 
 
+
+
 ##Inpatient scheme j
 
 sch_inp_basej = arrow::schema(
@@ -950,6 +952,7 @@ sch_outp_basek = arrow::schema(
 )
 
 
+#Inpatient K revenue
 sch_inp_rev = arrow::schema(
   DSYSRTKY=string(),
   CLAIMNO=string(),
@@ -974,4 +977,50 @@ sch_inp_rev = arrow::schema(
   REV_CNTR_PRCNG_IND_CD=string(),
   THRPY_CAP_IND_CD1=string(),
   THRPY_CAP_IND_CD2=string()
+)
+
+#Outpatint K revenue
+
+sch_outp_rev = arrow::schema(
+  DSYSRTKY=numeric(),
+  CLAIMNO=numeric(),
+  CLM_LN=numeric(),
+  THRU_DT=string(),
+  CLM_TYPE=string(),
+  REV_CNTR=string(),
+  REV_DT=string(),
+  APCHIPPS=string(),
+  HCPCS_CD=string(),
+  MDFR_CD1=string(),
+  MDFR_CD2=string(),
+  MDFR_CD3=string(),
+  MDFR_CD4=string(),
+  PMTMTHD=string(),
+  DSCNTIND=string(),
+  PACKGIND=string(),
+  OTAF_1=string(),
+  IDENDC=string(),
+  REV_UNIT=numeric(),
+  REV_RATE=numeric(),
+  REVBLOOD=numeric(),
+  REVDCTBL=numeric(),
+  WAGEADJ=numeric(),
+  RDCDCOIN=numeric(),
+  REV_MSP1=numeric(),
+  REV_MSP2=numeric(),
+  RPRVDPMT=numeric(),
+  RBENEPMT=numeric(),
+  PTNTRESP=numeric(),
+  REVPMT=numeric(),
+  REV_CHRG=numeric(),
+  REV_NCVR=numeric(),
+  REVSTIND=string(),
+  REV_CNTR_PRICNG_IND_CD=string(),
+  REV_CNTR_RNDRNG_PHYSN_UPIN=string(),
+  REV_CNTR_RNDRNG_PHYSN_NPI=string(),
+  REV_CNTR_RNDRNG_PHYSN_SPCLTY_CD=string(),
+  REVDEDCD=string(),
+  THRPY_CAP_IND_CD1=string(),
+  THRPY_CAP_IND_CD2=string(),
+  RC_PTNT_ADD_ON_PYMT_AMT=numeric()
 )
