@@ -13,6 +13,8 @@ library(dplyr)
 library(ggplot2)
 library(usmap)
 library(ggalluvial)
+library(geofacet)
+
 
 library(scales)
 library(spatstat)
@@ -87,20 +89,53 @@ AZ:
 2019: 177,798
 2020: 155,167
 2021: 148802
+
+FL
+2016	823,849			
+2017	819,494			
+2018	796,620			
+2019	783,523			
+2020	663,483			
+2021	636,013	
 ```{r, eval=F}
 N_date <- pq_stream_inp_k %>%
-  group_by(ADMSN_DT,STATE_CD,TYPE_ADM) %>%
+  mutate(PROVIDER_STATE=substr(PROVIDER,1,2))%>%
+  group_by(ADMSN_DT,PROVIDER_STATE,TYPE_ADM) %>%
   summarize(N=n()) %>%
   collect()
 
-N_year <- N_date %>%
+N_year_AZ <- N_date %>%
   mutate(date= as.Date(ADMSN_DT, '%Y%m%d'),
-         year=year(date)) %>%
-  filter(STATE_CD=='03') %>% #arizona
+         year=year(date),
+         PROVIDER_STATE=substr(PROVIDER,1,2)) %>%
+  filter(PROVIDER_STATE=='03') %>% #arizona
   group_by(year,TYPE_ADM) %>%
   summarize(N=sum(N))
-  N_year
+  N_year_AZ
   
+  N_year_FL <- N_date %>%
+  mutate(date= as.Date(ADMSN_DT, '%Y%m%d'),
+         year=year(date)) %>%
+  filter(PROVIDER_STATE=='10') %>% #FL
+  group_by(year) %>%
+  summarize(N=sum(N))
+  N_year_FL
+  
+  
+  #number of unique people hospitalized per year
+  N_year_state <- pq_stream_inp_k %>%
+      mutate(PROVIDER_STATE=substr(PROVIDER,1,2),
+             date= as.Date(ADMSN_DT, '%Y%m%d'),
+         year=year(date)) %>%
+        filter(PROVIDER_STATE=='10')%>%
+  group_by(year,PROVIDER_STATE,DSYSRTKY) %>%
+    dplyr::select(PROVIDER_STATE,year, DSYSRTKY) %>%
+    distinct() %>%
+  summarize(N=n()) %>%
+  collect() %>% 
+    ungroup()%>%
+    group_by(year, PROVIDER_STATE) %>%
+    summarize(N=n())
   
   inp_out <- pq_stream_out %>%
     filter(clm_thru_dt=='2018-08-24' &  bene_state_cd=='03') %>% #inpatient claims found in outpatient
@@ -252,14 +287,6 @@ LOS_trends %>%
 
 ## LoS by source of admission and destination fo discharge
 
-
-NOTE: To identify Inpatient claims that originated in ED: https://resdac.org/articles/how-identify-hospital-claims-emergency-room-visits-medicare-claims-data
-In summary, to find ER visits:
-
-Outpatient files:  Revenue Center Codes 0450-0459, 0981
-Inpatient files:  Revenue Center Codes 0450-0459, 0981
-Although one can assume ER patients found in the inpatient data were admitted to the hospital, one cannot assume ER patients found in the outpatient data were not admitted to the hospital. Because some patients are transferred to a different hospital for admission and some hospitals bill ER and inpatient services separately, determining admission status for those ER visits found in the Outpatient file requires linking to the inpatient data to find evidence of an admission. Please note charges for one ER visit will be found in either the Outpatient claims or the Inpatient claims; a visit will not generate ER charges on both an inpatient claim and an outpatient claim.
-
 mean Length of stay (LOS)
 
 SRC_ADMS
@@ -393,22 +420,6 @@ n_loc_out2
 ```
 
 
-need to find people from both outpatient and inpatient files with an ED code, then reconcile
-```{r}
-inp_ed_codes <- pq_stream_charge_k_inp %>%
-  dplyr::select(DSYSRTKY,REV_CNTR) %>%
-  filter( (REV_CNTR >='0450' & REV_CNTR<= '0459')| REV_CNTR=='0981' )#%>%
-  #collect()
-
-
-#which people had an inpatient claim?
-inp_ids <- pq_stream_inp_k %>%
-  dplyr::select(DSYSRTKY) %>%
-    collect() %>%
-  pull(DSYSRTKY) %>%
-  unique() 
-saveRDS(inp_ids,'./Data/unique_inpatient_ids_k.rds')
-```
 
 ## National, by chapter
 ```{r, fig.width=10, fig.height=9}
@@ -753,8 +764,24 @@ rsv1 <- rsv_line_list %>%
   left_join(state_cw, by=c('STATE_CD'='STATE_SSA'))  %>%
   mutate(STATENAME = if_else( STATENAME=='New York', 'NY', STATENAME))
 
+rsv_wk_state <- rsv1 %>% 
+  filter(year<=2019) %>%
+  group_by(STATE_CD,STATENAME,week) %>%
+  summarize(RSV_adj_movave=mean(RSV_adj_movave)) %>%
+  mutate(state=state.abb[match(STATENAME,state.name)]) %>%
+  filter(!(state %in% c('HI','AK','DC'))) %>%
+  ungroup()
+
+my_us_grid <- us_state_grid1[c(-2, -11,-51), ]
+
+ggplot(rsv_wk_state, aes(x=week, y=RSV_adj_movave))+
+  geom_line()+
+    facet_geo( ~ state, grid = my_us_grid) +
+  theme_classic()
+
+
 rsv1 %>%
-  filter(STATENAME %in% c('Florida','NY') & epiyr>=2014) %>%
+  filter(STATENAME %in% c('Florida','NY', 'Washington') & epiyr>=2014) %>%
 ggplot( aes(x=weekdate, y=RSV_adj_movave, group=STATENAME, color=STATENAME)) +
   geom_line(show.legend = FALSE)+
   theme_classic()+
@@ -790,40 +817,43 @@ rsv1 <- rsv_line_list %>%
 
 
 ```{r, eval=F}
-pneumonia_line_list <- pq_stream_inp_k %>%
-  mutate(adate=as.Date(ADMSN_DT,'%Y%m%d'),     
-             all_dx = paste0(ICD_DGNS_CD1,
-                         ICD_DGNS_CD1,
-                         ICD_DGNS_CD2,
-                         ICD_DGNS_CD3,
-                         ICD_DGNS_CD4,
-                         ICD_DGNS_CD5,
-                         ICD_DGNS_CD6,
-                         ICD_DGNS_CD7,
-                         ICD_DGNS_CD8,
-                         ICD_DGNS_CD9,
-                         ICD_DGNS_CD10,
-                         ICD_DGNS_CD11,
-                         ICD_DGNS_CD12,
-                         ICD_DGNS_CD13,
-                         ICD_DGNS_CD14,
-                         ICD_DGNS_CD15,
-                         ICD_DGNS_CD16,
-                         ICD_DGNS_CD17,
-                    ICD_DGNS_CD18,
-                    ICD_DGNS_CD19,
-                    ICD_DGNS_CD20,
-                    ICD_DGNS_CD21,
-                    ICD_DGNS_CD22,
-                    ICD_DGNS_CD23,
-                    ICD_DGNS_CD24,
-                    ICD_DGNS_CD24)
-                  )%>%
-  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
-  select(DSYSRTKY,all_dx,adate, STATE_CD,CNTY_CD) %>%
-  collect()
+# pneumonia_line_list <- pq_stream_inp_k %>%
+#   mutate(adate=as.Date(ADMSN_DT,'%Y%m%d'),     
+#              all_dx = paste0(ICD_DGNS_CD1,
+#                          ICD_DGNS_CD1,
+#                          ICD_DGNS_CD2,
+#                          ICD_DGNS_CD3,
+#                          ICD_DGNS_CD4,
+#                          ICD_DGNS_CD5,
+#                          ICD_DGNS_CD6,
+#                          ICD_DGNS_CD7,
+#                          ICD_DGNS_CD8,
+#                          ICD_DGNS_CD9,
+#                          ICD_DGNS_CD10,
+#                          ICD_DGNS_CD11,
+#                          ICD_DGNS_CD12,
+#                          ICD_DGNS_CD13,
+#                          ICD_DGNS_CD14,
+#                          ICD_DGNS_CD15,
+#                          ICD_DGNS_CD16,
+#                          ICD_DGNS_CD17,
+#                     ICD_DGNS_CD18,
+#                     ICD_DGNS_CD19,
+#                     ICD_DGNS_CD20,
+#                     ICD_DGNS_CD21,
+#                     ICD_DGNS_CD22,
+#                     ICD_DGNS_CD23,
+#                     ICD_DGNS_CD24,
+#                     ICD_DGNS_CD24)
+#                   )%>%
+#   filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+#   select(DSYSRTKY,all_dx,adate, STATE_CD,CNTY_CD) %>%
+#   collect()
+# 
+# saveRDS(pneumonia_line_list,'T:/results/inp/J12_j18_id_dates.rds')
 
-saveRDS(pneumonia_line_list,'T:/results/inp/J12_j18_id_dates.rds')
+
+pneumonia_line_list <- readRDS('T:/results/inp/J12_j18_id_dates.rds')
 
 any_return_hosp <- pq_stream_inp_k %>%
   mutate(adate2=as.Date(ADMSN_DT,'%Y%m%d')) %>%     
@@ -832,6 +862,117 @@ any_return_hosp <- pq_stream_inp_k %>%
     summarize(N_events=n()) %>%
     collect()
 ```  
+## Readmission pattern pneumonia
+Look at history and future of anyone admitted with pneumonia
+
+TEST why do some people have so many admissions?
+```{r}
+
+test <-  pq_stream_inp_k %>%
+  dplyr::select(DSYSRTKY, ADMSN_DT,SRC_ADMS, starts_with("ICD_DGNS_CD") ) %>%
+  to_duckdb() %>%
+  filter(DSYSRTKY %in% unique_ids_ed_inp & SRC_ADMS %in% c(1,2,3,7)  ) %>%
+  group_by(DSYSRTKY) %>%
+  mutate(N_obs=n() ,obsN=row_number()) %>%
+  ungroup() %>%
+  filter(obsN==1) %>%
+  group_by(N_obs) %>%
+  summarize(N_people=n()) %>%
+  collect()
+
+```
+
+```{r}
+
+ed_inpatients <- readRDS('./Data/ed_inpatients.rds')
+
+unique_ids_ed_inp <- unique(ed_inpatients$DSYSRTKY)
+
+pneumonia_line_list <- readRDS('T:/results/inp/J12_j18_id_dates.rds') %>% 
+  rename(adate_pneumonia=adate) %>%
+  mutate(j13=1*grepl('J13',all_dx),
+         J12_J18 =  if_else(grepl('J12',all_dx)| grepl('J13',all_dx)|grepl('J14',all_dx)| grepl('J15',all_dx) |grepl('J16',all_dx)| grepl('J17',all_dx) | grepl('J18',all_dx) ,1,0 )) %>%
+           filter(J12_J18==1) %>%
+    dplyr::select(DSYSRTKY,adate_pneumonia,J12_J18) 
+
+
+any_return_hosp <- pq_stream_inp_k %>%
+  dplyr::select(DSYSRTKY, ADMSN_DT,SRC_ADMS, starts_with("ICD_DGNS_CD") ) %>%
+  filter(DSYSRTKY %in% unique_ids_ed_inp & SRC_ADMS %in% c(1,2,3,7)  ) %>% #eliminate transfers, try to filter to ED admissions, but that is if the person ever had an ED code, not necesarily if it was at same time--could fix this by doing a match based on time
+  mutate(adate2=as.Date(ADMSN_DT,'%Y%m%d')) %>%     
+  right_join(pneumonia_line_list , by='DSYSRTKY') %>%
+  collect()
+
+write_dataset(any_return_hosp, "T:/parquet/pneumonia_return_hosp/", format = "parquet", 
+               max_rows_per_file = 5e6,
+           #   max_open_files=20, #default is 900L
+              hive_style = TRUE,
+              existing_data_behavior = "overwrite")
+
+# saveRDS(any_return_hosp,'T:/results/inp/pneumonia_re_admits.rds')
+
+any_return_hosp <- open_dataset("T:/parquet/pneumonia_return_hosp/", format = "parquet")
+
+time_between <- any_return_hosp %>% 
+  arrange(DSYSRTKY, adate2) %>%
+  group_by(DSYSRTKY ) %>%
+  to_duckdb() %>%
+  mutate(visitN=row_number(), 
+         time_from_visit = as.numeric(adate2 - lag(adate2, 1)) )%>%
+  filter(visitN==1 | time_from_visit>=30 ) %>%
+  mutate(visitN_filtered=n()) %>%
+  ungroup() %>%
+   summarize(mean_time=mean(time_from_visit, na.rm=T),
+             lcl=quantile(time_from_visit, probs=0.2),
+            ucl=quantile(time_from_visit, probs=0.8),
+            N_visits=mean(visitN_filtered),
+            N=n()
+             ) %>%
+  collect()
+# 10.9 million visits total; from 7.5 million people who had a pneumonia visit
+#before visiting, 172 records per person; after filtering goes to mean 3.5 visits/person
+
+ patterns_return <- any_return_hosp %>% 
+  arrange(DSYSRTKY, adate2) %>%
+  to_duckdb() %>%
+   ungroup() %>%
+   group_by(DSYSRTKY ) %>%
+  mutate(visitN=row_number(), 
+         time_from_visit = as.numeric(adate2 - lag(adate2, 1)) )%>%
+  filter(visitN==1 | time_from_visit>=30 ) %>%
+  mutate(visitN_filtered=row_number(),
+         visitN_j12 = J12_J18*visitN_filtered ,
+         visitN_j12 = if_else(is.na(visitN_j12),NA_real_,visitN_j12),
+         visitN_rel_j12 = visitN_filtered - visitN_j12 , 
+         admit_pattern = group_concat(visitN_rel_j12, '_') 
+         ) %>%
+   filter(visitN_filtered==0) %>%
+   ungroup() %>%
+   group_by(admit_pattern,DSYSRTKY = any_value(DSYSRTKY)) %>%
+   summarize(N=n()) %>%
+collect()
+
+
+
+
+
+N_hosps <- any_return_hosp %>% 
+  arrange(DSYSRTKY, adate2) %>%
+  group_by(DSYSRTKY ) %>%
+  to_duckdb() %>%
+  mutate(visitN=row_number(), 
+         time_from_visit = as.numeric(adate2 - lag(adate2, 1)) )%>%
+  filter(visitN==1 | time_from_visit>=30 ) %>%
+  summarize(N_visits= max(visitN)) %>% 
+  ungroup() %>%
+    group_by(N_visits)%>%
+    summarize(N=n()) %>%
+collect()
+N_hosps %>% arrange(-N)
+
+
+```
+
 
 ```{r}
 pneumonia_line_list <- readRDS('T:/results/inp/J12_j18_id_dates.rds')
@@ -953,6 +1094,19 @@ ggplot( aes(x=monthdate, y=N_pneu)) +
   ylim(0,500) +
   ylab('N admissions')
 
+
+
+fl <- pneumonia_line_list %>%
+  filter(STATE_CD=='10') %>% #FL only
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate, STATE_CD) %>%
+  collect()
+
+fl %>%
+  mutate(year=year(adate)) %>%
+  group_by(year) %>%
+  summarize(N = n() ) 
+saveRDS(fl,'T:/results/inp/all_FL.rds')
 ```
 
 
@@ -1311,7 +1465,7 @@ fig1a <- plot.fun(ds=county_leg,plotvar='inc_leg', maintitle='', subtitle='', ro
 
 fig1a
 ```
- 
+
 
 ## Proedure codes
 Example:infliximab

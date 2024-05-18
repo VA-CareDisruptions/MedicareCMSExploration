@@ -45,6 +45,13 @@ pq_stream_sid_ch <- open_dataset("R:/ParquetData/AZ_chgs", format = "parquet") %
     rename(KEY= `HCUP record identifier`) %>%
   dplyr::select(icu, obs_rm, med_surg, KEY) 
 
+pq_stream_sid_fl <- open_dataset("R:/ParquetData/FL", format = "parquet")
+
+#96% of all hosp are floridians
+# pq_stream_sid_fl %>%
+#   group_by(PSTATE) %>%
+#   summarize(N=n())%>%
+#   collect()
 
 
 
@@ -60,7 +67,9 @@ pq_stream_sid_ch <- open_dataset("R:/ParquetData/AZ_chgs", format = "parquet") %
 
 ```{r}
 basic.info <- pq_stream_sid %>%
-  dplyr::select(KEY, YEAR)
+  dplyr::select(KEY, YEAR,AGE) #%>%
+   # mutate(AGE=as.numeric(AGE)) %>%
+  #collect()
 
 med_surg_trend <- pq_stream_sid_ch %>%
   left_join(basic.info, by='KEY') %>%
@@ -82,6 +91,18 @@ obs_trend <- pq_stream_sid_ch %>%
   #filter(med_surg==1) %>%
    summarize(N=n()) %>%
      collect() 
+
+obs_trend_over65 <- pq_stream_sid_ch %>%
+    left_join(basic.info, by='KEY')%>%
+   group_by(AGE,obs_rm, YEAR) %>%
+   summarize(N=n()) %>%
+     collect() %>%
+    mutate(AGE=as.numeric(AGE)) %>%
+  ungroup() %>%
+  filter(AGE>=65) %>%
+  group_by(obs_rm, YEAR) %>%
+     summarize(N=sum(N)) 
+
 
 ggplot(obs_trend, aes(x=YEAR, y=N)) +
   geom_line() + geom_point()+
@@ -108,10 +129,9 @@ ggplot(icu_trend, aes(x=YEAR, y=N)) +
 
 How many hospitalizations in 65+ by year?
 SID/AHRQ:
-2019: 284,107
+2019: 284,107 (223,349 observation, YY non observation)
 2020:262,364
 2021: 275,424
-
 
 Compare to Medicare:
 2019: 177,798
@@ -127,6 +147,31 @@ ATYPE
 5 =  Trauma Center
 9=Missing ((2019: 161 in Medicare))
 
+
+FL
+Medicare?--THIS COUNT NUMBER OF UNIQUE VISITS (number of unique people)
+by stat eof residence for FL
+2016	823,849			(471,109)
+2017	819,494			(468,503)
+2018	796,620			(457,333)
+2019	783,523			(449,959)
+2020	663,483			(390,390)
+
+peoplele, by state of service
+  2016 10             495,527
+  2017 10             490,625
+  2018 10             479,336
+  2019 10             471,806
+  2020 10             409,966
+  2021 10             393,117
+
+SID--NOTE THIS COUNTS NUMBER OF UNIQUE PEOPLE HOSPITALIZED (Medicare as primary payer)
+  2016 677284 (635,840)
+  2017 692860 (650,101)
+  2018 698567 (656,490)
+  2019 707783 (662,092)
+  2020 654278 (608,953)
+
 ```{r, fig.width=6, fig.height=4}
 N_hosp_AZ <- pq_stream_sid %>%
       mutate(AGE = if_else(AGE %in% c('','C'),NA_character_,AGE),
@@ -134,8 +179,18 @@ N_hosp_AZ <- pq_stream_sid %>%
          YEAR=as.numeric(YEAR)) %>%
   filter(AGE>=65) %>%
   group_by(YEAR, ATYPE) %>%
-  summarize(N=n_distinct(MRN_R)) %>% #count number of unique people 
+  summarize(N=n_distinct(MRN_R)) %>% #count number of unique people within hospital
     collect()
+
+N_hosp_fl <- pq_stream_sid_fl %>%
+      mutate(AGE = if_else(AGE %in% c('','C'),NA_character_,AGE),
+      AGE=as.numeric(AGE), 
+         YEAR=as.numeric(YEAR)) %>%
+  filter(AGE>=65 & (PAY1==1)) %>%
+  group_by(YEAR) %>%
+  summarize(N=n_distinct(VisitLink)) %>% #count number of unique people 
+    collect()
+N_hosp_fl %>% arrange(YEAR)
 ```
 
 ```{r, fig.width=6, fig.height=3}

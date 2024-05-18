@@ -36,6 +36,7 @@ pq_stream_denom <- open_dataset("T:/parquet/denom/", format = "parquet", schema 
 
 ```{r} 
 pq_stream_inp_k <- open_dataset("T:/parquet/inp_k/", format = "parquet" , schema=sch_inp_basek) 
+
 pq_stream_inp_j <- open_dataset("T:/parquet/inp_j/", format = "parquet", schema=sch_inp_basej)
 
 #pq_stream_out <- open_dataset("T:/parquet/outp/", format = "parquet", schema=sch_outp_basek)
@@ -45,7 +46,7 @@ AZ:
 2018: 176,434
 2019: 177,798
 2020: 155,167
-2021: 148802
+2021: 148,802
 ```{r, eval=F}
 N_date <- pq_stream_inp_k %>%
   group_by(ADMSN_DT,STATE_CD,TYPE_ADM) %>%
@@ -771,6 +772,18 @@ ggplot( aes(x=monthdate, y=N_pneu)) +
   ylim(0,500) +
   ylab('N admissions')
 
+
+fl <- pneumonia_line_list %>%
+  filter(STATE_CD=='10') %>% #FL only
+  filter( grepl('J12',all_dx)|grepl('J13',all_dx)|grepl('J14',all_dx)|grepl('J15',all_dx)|grepl('J16',all_dx)|grepl('J17',all_dx)|grepl('J18',all_dx)|grepl('A403',all_dx)|grepl('G001',all_dx)) %>%
+  select(DSYSRTKY,all_dx,adate, STATE_CD) %>%
+  collect()
+
+fl %>%
+  mutate(year=year(adate)) %>%
+  group_by(year) %>%
+  summarize(N = n() ) 
+saveRDS(fl,'T:/results/inp/all_FL.rds')
 ```
 
 
@@ -1040,8 +1053,27 @@ ggplotly(p1)
 proc.time() - ptm
 ```
 
+
+FLORIDA
+RESTRICT TO AZ (state=3)
 ```{r}
 
+ptm <- proc.time() 
+LOS_date_admit_inp_AZ <- pq_stream_inp_k %>% 
+  to_duckdb() %>%
+  filter(DSCHRGDT !='' & STATE_CD == '10' ) %>%
+   mutate(
+         dateADMT=strptime(ADMSN_DT,'%Y%m%d'),
+         ) %>%
+  filter(dateADMT>='2016-01-01' & dateADMT<='2021-11-20' ) %>%
+  select(dateADMT, LOS2) %>%
+  collect() 
+
+LOS_date_admit_inp_summary_AZ <- LOS_date_admit_inp_AZ %>%
+group_by(dateADMT, LOS2) %>%
+   summarize(N=n()) %>%
+  mutate(dateADMT=as.Date(dateADMT),
+         dateDIS= dateADMT + LOS2)
 ```
 
 ## LEgionella OR pneumonia

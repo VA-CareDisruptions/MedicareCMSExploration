@@ -127,8 +127,8 @@ outpatient charge files
 
 ```{r}
 
-csv_stream_outp_charge <- open_dataset("T:/out/charge_k", format = "csv", schema = sch_outp_rev)%>%
-  dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT,CLM_TYPE,REV_CNTR)
+csv_stream_outp_charge <- open_dataset("T:/out/charge_k", format = "csv", schema = sch_outp_rev) #%>%
+ # dplyr::select(DSYSRTKY,CLAIMNO,THRU_DT,CLM_TYPE,REV_CNTR)
 
 write_dataset(csv_stream_outp_charge, "T:/parquet/outp_k_charge/" , format = "parquet", 
                max_rows_per_file = 5e6,
@@ -149,3 +149,58 @@ write_dataset(csv_stream_snf, dest_snf, format = "parquet",
               hive_style = TRUE,
               existing_data_behavior = "overwrite")
 ```
+
+
+## Identify inpatients that originated in the ED
+
+NOTE: To identify Inpatient claims that originated in ED: https://resdac.org/articles/how-identify-hospital-claims-emergency-room-visits-medicare-claims-data
+In summary, to find ER visits:
+
+Outpatient files:  Revenue Center Codes 0450-0459, 0981
+Inpatient files:  Revenue Center Codes 0450-0459, 0981
+Although one can assume ER patients found in the inpatient data were admitted to the hospital, one cannot assume ER patients found in the outpatient data were not admitted to the hospital. Because some patients are transferred to a different hospital for admission and some hospitals bill ER and inpatient services separately, determining admission status for those ER visits found in the Outpatient file requires linking to the inpatient data to find evidence of an admission. Please note charges for one ER visit will be found in either the Outpatient claims or the Inpatient claims; a visit will not generate ER charges on both an inpatient claim and an outpatient claim.
+need to find people from both outpatient and inpatient files with an ED code, then reconcile
+
+note just because someone has an ED flag, doesn't mean they directly came from ED could be ED to hospital 1 transferred to hospital 2. Should also filter by listed admission source AND de-duplicate (e.g., only count first visit in a certain time frame).
+```{r, eval=F}
+
+#which people had an inpatient claim?
+# inp_ids <- pq_stream_inp_k %>%
+#   dplyr::select(DSYSRTKY) %>%
+#     collect() %>%
+#   pull(DSYSRTKY) %>%
+#   unique()
+# saveRDS(inp_ids,'./Data/unique_inpatient_ids_k.rds')
+
+pq_stream_charge_k_inp <- open_dataset("T:/parquet/inp_k_chg/", format = "parquet" ) 
+
+
+inp_ids <- readRDS('./Data/unique_inpatient_ids_k.rds') #66 mB
+
+
+inp_ed_codes <- pq_stream_charge_k_inp %>%
+  dplyr::select(DSYSRTKY,REV_CNTR) %>%
+  filter( (REV_CNTR >='0450' & REV_CNTR<= '0459')| REV_CNTR=='0981' ) %>%
+  collect()
+
+#Note this is CSV, not parquet
+csv_stream_out_k <- open_dataset("T:/out/charge_k/", format = "csv" , schema=sch_outp_rev ) %>%
+  dplyr::select(DSYSRTKY,REV_CNTR) %>%
+  filter( DSYSRTKY %in% inp_ids & (REV_CNTR >='0450' & REV_CNTR<= '0459')| REV_CNTR=='0981' ) %>%
+  collect()
+
+inp_ed_codes <- inp_ed_codes %>%
+  mutate(DSYSRTKY=as.character(DSYSRTKY))
+
+csv_stream_out_k <- csv_stream_out_k %>%
+  mutate(DSYSRTKY=as.character(DSYSRTKY))
+
+#people who are inpatients and have an ED code from either outpatient or inpatient file (note match by date; this is crude approach) 
+ bind_rows(csv_stream_out_k,inp_ed_codes) %>%
+ saveRDS('./Data/ed_inpatients.rds')
+```
+
+```{r}
+
+```
+
