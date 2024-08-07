@@ -1,5 +1,7 @@
 plot.fun <- function(ds, plotvar,maintitle='', quantset=NA,cutset=NA, subtitle='', plot.cuts='quantile',roundscale=-2, statevec=state.abb, scaletitle='Rate'){
   
+  ds <- as.data.frame(ds)
+  
   if(plot.cuts=='quantile'){
     ds$cuts <- as.integer(cut(ecdf(ds[,plotvar])(ds[,plotvar]), seq(0,1,.01)))
     quants <- quantile(ds[,plotvar])
@@ -14,10 +16,10 @@ plot.fun <- function(ds, plotvar,maintitle='', quantset=NA,cutset=NA, subtitle='
                   as.character(''))
     
   }else if(plot.cuts=='weighted_quantile'){
-    ds$cuts <- as.integer(cut(ewcdf(ds[,plotvar], weights=ds[,'pop_2015'])(ds[,plotvar]), seq(0,1,.01)))
+    ds$cuts <- as.integer(cut(ewcdf(ds[,plotvar], weights=ds[,'pop_2022'])(ds[,plotvar]), seq(0,1,.01)))
     
     
-    quants <- weighted.quantile(ds[,plotvar], w=ds[,'pop_2015'], probs=seq(0,1,0.25), na.rm = TRUE)
+    quants <- weighted.quantile(ds[,plotvar], w=ds[,'pop_2022'], probs=seq(0,1,0.25), na.rm = TRUE)
     plotlabs <- c(as.character(''), 
                   rep('', 23),  
                   as.character(round(quants[2],roundscale)),
@@ -49,7 +51,7 @@ plot.fun <- function(ds, plotvar,maintitle='', quantset=NA,cutset=NA, subtitle='
   }
   
   
-  p1 <- plot_usmap(include = c(statevec),data= ds, values='cuts' ,regions = "counties", color='NA') + 
+  p1 <- plot_usmap(regions = "counties",include=state.abb ,data= ds, values='cuts' , color='NA') + 
     labs(title = maintitle,
          subtitle = subtitle) + 
     theme(panel.background = element_rect(color = "white", fill = "white")) +
