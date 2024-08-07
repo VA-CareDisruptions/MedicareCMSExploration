@@ -6,18 +6,15 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-#require(remotes)
-#install_version("usmap", version = "0.6.4", repos = "http://cran.us.r-project.org") #has 2015 population
-
 knitr::opts_chunk$set(echo = TRUE)
 library(arrow)
 library(tidyr)
 library(dplyr)
 library(ggplot2)
-
+library(usmap)
 library(ggalluvial)
 library(geofacet)
-library(usmap)
+
 
 library(scales)
 library(spatstat)
@@ -33,8 +30,6 @@ state_cw <- read.csv('./Data/SSA_state_crosswalk.csv')
 #state_cw <- statepop %>% select(fips, abbr)
 state.info <- cbind.data.frame(state.name, state.abb, state.region)
 
-county_cw <- read.csv('./Data/ssa_fips_state_county2015.csv') %>%
-  select(ssacounty, fipscounty)
 ```
 
 ## Read in the parquet database
@@ -816,47 +811,6 @@ rsv1 <- rsv_line_list %>%
  # filter(weekdate>='2017-01-01') %>%
   group_by(weekdate) %>%
   summarize(N_rsv = n() )
-
-```
-
-## County-level time series and map of RSV
-```{r, fig.width=5.5, fig.height=5}
-rsv_line_list <- readRDS('T:/results/inp/rsv_id_dates.rds')
-
-#County codes 
-rsv1_county_wk <- rsv_line_list %>%
-  mutate(weekdate=floor_date(adate, 'week'),
-         STATE_CD=as.numeric(STATE_CD)) %>%
- # filter(weekdate>='2017-01-01') %>%
-  group_by(STATE_CD,CNTY_CD,weekdate) %>%
-  summarize(N_rsv = n() ) %>%
-  left_join(state_cw, by=c('STATE_CD'='STATE_SSA')) %>%
-  left_join(state.info,by=c('STATENAME'='state.name')) %>%
-mutate(ssacounty=paste0(STATE_CD,CNTY_CD),
-     ssacounty=as.numeric(ssacounty) ) %>%
- left_join(county_cw, by=c('ssacounty'='ssacounty')) %>%
-    mutate(fipscounty=as.character(fipscounty),
-           fipscounty= stringr::str_pad(fipscounty, 5, pad = "0") ) 
-  
-  
-
-rsv1_county <- rsv1_county_wk %>%
-  group_by(fipscounty,state.abb ) %>%
-  summarize( N_rsv = sum(N_rsv) ) %>%
-    full_join(countypop, by=c('fipscounty'='fips')) %>%
-  mutate(N_rsv=if_else(is.na(N_rsv),0,N_rsv) ,
-         pop_2022=if_else(is.na(pop_2022),0, pop_2022),
-         inc_rsv = N_rsv/pop_2022*100000 ) %>%
-  rename(fips=fipscounty) %>%
-  ungroup() %>%
-  filter(pop_2022 !=0)
-
-##note--this os overall pop--would be better to use pop 65+ (or even better the medicare pop per county)...
-##CT is missing because of change in county definitions--need to use 2015 file
-
-fig1a <- plot.fun(ds=rsv1_county,plotvar='inc_rsv', maintitle='', subtitle='', roundscale = 1,plot.cuts='weighted_quantile')
-
-fig1a
 ```
 
 
@@ -1148,20 +1102,11 @@ fl <- pneumonia_line_list %>%
   select(DSYSRTKY,all_dx,adate, STATE_CD) %>%
   collect()
 
-
-
 fl %>%
   mutate(year=year(adate)) %>%
   group_by(year) %>%
   summarize(N = n() ) 
 saveRDS(fl,'T:/results/inp/all_FL.rds')
-
-
-fl_wk_cnty <- pneumonia_line_list %>%
-  filter(STATE_CD=='10') %>%
-  mutate(weekdate = floor_date(adate, 'week')) %>%
-  group_by(weekdate,CNTY_CD) %>%
-    summarize(N=n())
 ```
 
 
@@ -1501,8 +1446,6 @@ View(legionella %>%
 county_cw <- read.csv('./Data/ssa_fips_state_county2015.csv') %>%
   select(ssacounty, fipscounty)
 
-
-
 county_leg <- legionella %>%
   mutate(ssacounty=paste0(STATE_CD,CNTY_CD)) %>%
   group_by(ssacounty) %>%
@@ -1513,7 +1456,7 @@ county_leg <- legionella %>%
     mutate(fipscounty=as.character(fipscounty),
            fipscounty= stringr::str_pad(fipscounty, 5, pad = "0") ) %>%
   full_join(countypop, by=c('fipscounty'='fips')) %>%
-  mutate( N_leg = if_else(is.na(N_leg),0,N_leg) , inc_leg = N_leg/pop_2022*100000 ) %>%
+  mutate( N_leg = if_else(is.na(N_leg),0,N_leg) , inc_leg = N_leg/pop_2015*100000 ) %>%
   filter(!is.na(inc_leg)) %>%
   rename(fips=fipscounty)
 

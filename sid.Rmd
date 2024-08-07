@@ -482,3 +482,175 @@ ggplot(test.agg2, aes(x=date, y=obs_rm)) +
 
 
 
+## RSV in Florida..no data on AMONTH!!
+
+```{r, eval=F}
+ptm <- proc.time()
+
+inp1_fl <- pq_stream_sid_fl %>%
+      dplyr::select(AGE,  YEAR,ZIP, ZIP3,ZIPINC_QRTL,starts_with('I10_DX')) %>%
+
+  mutate(   
+             all_dx = paste(I10_DX1,I10_DX2,I10_DX3,
+                            I10_DX4,
+                            I10_DX5,
+                            I10_DX6,
+                            I10_DX7,
+                            I10_DX8,
+                            I10_DX9,
+                            I10_DX10,
+                            I10_DX11,
+                            I10_DX12,
+                            I10_DX13,
+                            I10_DX14,
+                            I10_DX15,
+                            I10_DX16,
+                            I10_DX17,
+                            I10_DX18,
+                            I10_DX19,
+                            I10_DX20,
+                            I10_DX21,
+                            I10_DX22,
+                            I10_DX23,
+                            I10_DX24,
+                            I10_DX25)
+                  )%>%
+   filter(grepl("B974|J121|J205|J210", all_dx)) %>%
+  dplyr::select(AGE,  YEAR,ZIP, ZIP3,ZIPINC_QRTL,all_dx) %>%
+  collect()
+
+saveRDS(inp1_fl,'R:/ParquetData/fl_rsv.RDS')
+
+
+pq_stream_sedd_ny <- open_dataset("R:/ParquetData/NY_SEDD", format = "parquet")
+
+ed_ny <- pq_stream_sedd_ny %>%
+    dplyr::select(AGE,  AYEAR,AMONTH,ZIP, ZIP3,ZIPINC_QRTL,starts_with('I10_DX')) %>%
+  mutate(   
+             all_dx = paste(I10_DX1,I10_DX2,I10_DX3,
+                            I10_DX4,
+                            I10_DX5,
+                            I10_DX6,
+                            I10_DX7,
+                            I10_DX8,
+                            I10_DX9,
+                            I10_DX10,
+                            I10_DX11,
+                            I10_DX12,
+                            I10_DX13,
+                            I10_DX14,
+                            I10_DX15,
+                            I10_DX16,
+                            I10_DX17,
+                            I10_DX18,
+                            I10_DX19,
+                            I10_DX20,
+                            I10_DX21,
+                            I10_DX22,
+                            I10_DX23,
+                            I10_DX24,
+                            I10_DX25)
+                  )%>%
+   filter(grepl("B974|J121|J205|J210", all_dx)) %>%
+    dplyr::select(AGE,  AYEAR, AMONTH,ZIP, ZIP3,ZIPINC_QRTL,all_dx) %>%
+  collect()
+
+saveRDS(ed_ny,'R:/ParquetData/ny_ed_rsv.RDS')
+
+##inpatient
+pq_stream_sid_ny <- open_dataset("R:/ParquetData/NY", format = "parquet")
+
+inp_ny <- pq_stream_sid_ny %>%
+  rename(AGE='Age in years at admission',
+         AYEAR='Admission year',
+         AMONTH='Admission month',
+        ZIP='Patient ZIP Code',
+        ZIP3='Patient ZIP Code, first 3 digits',
+        ZIPINC_QRTL='Median household income state quartile for patient ZIP Code'
+  
+                  ) %>%
+    rename_with(
+    ~ paste0("I10_DX", 1:25),
+    .cols = paste0("ICD-10-CM Diagnosis ", 1:25) ) %>%
+    
+    dplyr::select(AGE,  AYEAR,AMONTH,ZIP, ZIP3,ZIPINC_QRTL,starts_with('I10_DX')) %>%
+  mutate(   
+             all_dx = paste(I10_DX1,I10_DX2,I10_DX3,
+                            I10_DX4,
+                            I10_DX5,
+                            I10_DX6,
+                            I10_DX7,
+                            I10_DX8,
+                            I10_DX9,
+                            I10_DX10,
+                            I10_DX11,
+                            I10_DX12,
+                            I10_DX13,
+                            I10_DX14,
+                            I10_DX15,
+                            I10_DX16,
+                            I10_DX17,
+                            I10_DX18,
+                            I10_DX19,
+                            I10_DX20,
+                            I10_DX21,
+                            I10_DX22,
+                            I10_DX23,
+                            I10_DX24,
+                            I10_DX25)
+                  )%>%
+   filter(grepl("B974|J121|J205|J210", all_dx)) %>%
+    dplyr::select(AGE,  AYEAR, AMONTH,ZIP, ZIP3,ZIPINC_QRTL,all_dx) %>%
+  collect()
+
+saveRDS(inp_ny,'R:/ParquetData/ny_inp_rsv.RDS')
+```
+
+
+```{r}
+inp_ny <- readRDS('R:/ParquetData/ny_inp_rsv.RDS')
+ed_ny <- readRDS('R:/ParquetData/ny_ed_rsv.RDS') %>%
+  mutate(AYEAR=as.numeric(AYEAR))
+
+all_data <- bind_rows(inp_ny, ed_ny) %>%
+  group_by(ZIP) %>%
+  summarize(N=n())
+
+
+```
+
+```{r}
+library(sf)
+library(ggplot2)
+library(dplyr)
+library(tigris)
+
+# Get ZIP code shapefile for New York
+ny_zips <- zctas(state = "NY", year = 2010)
+
+# Define NYC borough ZIP codes
+nyc_zips <- c(
+  "100", "101", "102", "103", "104", "105", "106", "107", "108", "109", # Manhattan
+  "110", "111", "112", "113", "114", "116", # Bronx
+  "115", "117", "118", "119", # Staten Island
+  "111", "112", "113", "114", "116", # Brooklyn (some overlap with Bronx)
+  "110", "111", "113", "114", "116"  # Queens (some overlap with Brooklyn and Bronx)
+)
+
+# Filter for NYC ZIP codes
+nyc_zips_sf <- ny_zips %>%
+  filter(substr(ZCTA5CE10, 1, 3) %in% nyc_zips)
+
+ny_map_data <- nyc_zips_sf %>%
+  left_join(all_data, by = c("ZCTA5CE10" = "ZIP"))
+
+ggplot(data = ny_map_data) +
+  geom_sf(aes(fill = N)) +
+  scale_fill_viridis_c(name = "Value") +
+  theme_minimal() +
+  labs(title = "New York City ZIP Code Choropleth Map",
+       subtitle = "Your Subtitle Here",
+       caption = "Data source: Your source")
+```
+
+
