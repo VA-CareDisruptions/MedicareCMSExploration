@@ -627,7 +627,7 @@ Popsize data
 #library(tidycensus)
 # You'll need a Census API key. Get one at http://api.census.gov/data/key_signup.html
 # Set your API key:
-# census_api_key("328f497b9440cbd533db22fa2c99582fca02c288", install=T)
+# census_api_key("KEY HERE", install=T)
 # Get population data for ZCTAs in New York
 # zcta_pop <- get_acs(
 #   geography = "zcta",
