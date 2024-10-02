@@ -128,6 +128,31 @@ ggplot(icu_trend, aes(x=YEAR, y=N)) +
     ggtitle("Trends for ICU")
 
 ```
+LOS in med/surg
+```{r}
+
+pq_stream_sid_slim <- pq_stream_sid %>%
+  dplyr::select(KEY,  AGE,YEAR, AMONTH, LOS) 
+
+pq_stream_sid_ch_slim <- pq_stream_sid_ch %>%
+     dplyr::select(med_surg, KEY) %>%
+    filter(med_surg==1)
+
+med_surg_los <- pq_stream_sid_ch_slim %>%
+  left_join(pq_stream_sid_slim, by='KEY') %>%
+   group_by( YEAR,AMONTH) %>%
+  mutate(LOS = if_else(LOS %in% c('','C'),NA_character_,LOS),
+      LOS=as.numeric(LOS)) %>%
+   summarize(LOS=mean(LOS, na.rm=T)) %>%
+  collect()
+
+med_surg_los %>%
+  mutate(date= as.Date(paste(YEAR, AMONTH, '01',sep='-' ))) %>%
+  ggplot()+
+  geom_line(aes(x=date, y=LOS)) +
+  theme_classic()
+```
+
 
 How many hospitalizations in 65+ by year?
 SID/AHRQ:
