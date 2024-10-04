@@ -73,6 +73,39 @@ SRC_adm
 8 = Court/law enforcement - The patient was admitted upon the direction of a court of law or upon the request of a law enforcement agency's representative.
 9 = Information not available - The means by which the patient was admitted is not known.
 
+## med/surg codes
+https://resdac.org/sites/datadocumentation.resdac.org/files/Revenue%20Center%20Code%20Code%20Book%20%28FFS%29.txt
+
+0111 = Private medical or general â€” medical/surgical/GYN
+
+0150 = Room and Board ward (medical or general) general classification
+0151 = Room and Board ward (medical or general) â€” medical/surgical/GYN
+
+0270 = Medical/surgical supplies â€” general
+classification (also reference 062X)
+0271 = Medical/surgical supplies â€”
+nonsterile supply
+0272 = Medical/surgical supplies â€” sterile
+supply
+
+0273 = Medical/surgical supplies â€” take home supplies
+0274 = Medical/surgical supplies â€”prosthetic/orthotic devices
+0275 = Medical/surgical supplies â€” pacemaker
+0276 = Medical/surgical supplies â€” intraocular lens
+0277 = Medical/surgical supplies â€” oxygen-take home
+0278 = Medical/surgical supplies â€” other implants
+0279 = Medical/surgical supplies â€” other devices
+
+0621 = Medical/surgical supplies â€”incident to radiology-subject to the payment limit â€” extension of 027X
+0622 = Medical/surgical supplies â€” incident to other diagnostic service-subject to the payment
+limit â€” extension of 027X
+0623 = Medical/surgical supplies â€” surgical dressings â€” extension of 027X
+0624 = Medical/surgical supplies â€” medical investigational devices and procedures with FDA
+```{r}
+
+```
+
+
 ```{r}
 source_and_type <- pq_stream_inp_k %>%
   dplyr::select(SRC_ADMS,TYPE_ADM) %>%
